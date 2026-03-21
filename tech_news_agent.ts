@@ -17,18 +17,42 @@ type Collected = {
   link: string;
 };
 
+/** Split model output into teleprompter script + 1-based story indices for links. */
+function parseScriptAndSources(
+  raw: string,
+  maxIndex: number
+): { script: string; indices: number[] } {
+  const marker = '<<<SOURCES>>>';
+  const pos = raw.indexOf(marker);
+  if (pos === -1) {
+    return { script: raw.trim(), indices: [] };
+  }
+  const script = raw.slice(0, pos).trim();
+  const after = raw.slice(pos + marker.length).trim();
+  const numLine = after.split(/\n/)[0] ?? '';
+  const indices = numLine
+    .split(/[,;\s]+/)
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n >= 1 && n <= maxIndex);
+  const seen = new Set<number>();
+  const unique = indices.filter((n) =>
+    seen.has(n) ? false : (seen.add(n), true)
+  );
+  return { script, indices: unique };
+}
+
 async function runNewsAgent() {
-  /** How many stories to take per feed (default 6 — old HN-only flow used ~8 from the front page). Override: FEED_ITEM_LIMIT=8 */
+  /** Fewer items per feed = tighter scripts (override with FEED_ITEM_LIMIT). */
   const perFeed = Math.min(
     20,
-    Math.max(1, parseInt(process.env.FEED_ITEM_LIMIT ?? '6', 10) || 6)
+    Math.max(1, parseInt(process.env.FEED_ITEM_LIMIT ?? '4', 10) || 4)
   );
 
+  /** Curated set — fewer feeds tends to match the “early scripts” quality. Add/remove URLs here. */
   const techFeeds = [
     'https://news.ycombinator.com/rss',
     'https://feeds.arstechnica.com/arstechnica/index',
     'https://www.theverge.com/rss/index.xml',
-    'https://techcrunch.com/feed/',
   ];
   const localFeeds = [
     'https://www.southwestjournal.com/feed/',
@@ -72,38 +96,43 @@ async function runNewsAgent() {
   await pull(techFeeds, 'TECH');
   await pull(localFeeds, 'LOCAL');
 
-  const bySection = (s: 'TECH' | 'LOCAL') =>
-    collected.filter((c) => c.section === s);
-
-  let newsContent = '';
-  for (const s of ['TECH', 'LOCAL'] as const) {
-    const rows = bySection(s);
-    if (!rows.length) continue;
-    newsContent += `${s}:\n`;
-    for (const r of rows) {
-      newsContent += `  • [${r.feedTitle}] ${r.title}\n`;
-    }
-    newsContent += '\n';
-  }
-
-  if (!newsContent.trim()) {
+  if (!collected.length) {
     throw new Error('No stories parsed from any feed — check URLs or network.');
   }
 
-  const prompt = `
-    You are a punchy, high-energy tech news anchor filming from your repair shop in Linden Hills.
-    
-    DATA FOR TODAY:
-    ${newsContent}
+  const storyListText = collected
+    .map((c, i) => {
+      const n = i + 1;
+      const url = c.link || '(no URL in feed)';
+      return `${n}. [${c.section}] ${c.title}\n   URL: ${url}`;
+    })
+    .join('\n\n');
 
-    TASK: Write a 60-second TV script.
-    - START: "Live from the bench in Linden Hills, I'm Kyle. We've got a lot hitting the shop today."
-    - MIDDLE: Mix the high-level tech news with local MN updates. 
-    - NBA SEGMENT: Always include a 'Wolves check-in' (The team is currently 43-27, 4th in the West).
-    - LOCAL VIBE: Mention something about Southwest Mpls (Lake Harriet, coffee shops, or local events).
-    - STYLE: Use [TELEPROMPTER STYLE]: short lines, ALL CAPS for emphasis, and phonetic spelling for tough names.
-    - END: "Back to the soldering iron. Catch you tomorrow."
-  `;
+  const prompt = `
+You are a punchy, high-energy tech news anchor filming from your repair shop in Linden Hills (Minneapolis).
+
+NUMBERED STORIES FOR TODAY (each has a URL for your reference only — you cannot browse the web):
+${storyListText}
+
+QUALITY RULES:
+- Pick only the **3–5 strongest stories** to actually talk about. Skip the rest — depth beats a laundry list.
+- If a headline includes a year like "(2024)", that is usually the article’s original date, not “breaking today.” Say “making the rounds” or “people are digging into…” unless it’s clearly new.
+- Do not invent products, prices, or dates. Stay close to the headlines.
+- Mix **tech** with **one local / Wolves** beat; keep it tight for **about 60 seconds** read aloud.
+
+SCRIPT RULES:
+- START with: "Live from the bench in Linden Hills, I'm Kyle. We've got a lot hitting the shop today."
+- Include a short **Wolves check-in** (team is 43–27, 4th in the West — adjust if you know it changed).
+- Include a **Southwest Minneapolis** nod (Lake Harriet, coffee, neighborhood vibe).
+- STYLE: teleprompter-friendly — short lines, ALL CAPS for emphasis, phonetic spellings for tricky names.
+- END with: "Back to the soldering iron. Catch you tomorrow."
+
+OUTPUT FORMAT (critical):
+1) Write ONLY the on-camera script first (no preamble, no bullet list of sources in the body).
+2) Then on its own line put exactly: <<<SOURCES>>>
+3) Then ONE line of comma-separated numbers — the **1-based story numbers** from the list above that you **actually mentioned or clearly relied on** in the script (for B-roll/screenshots). Example: 2,5,7
+- Only include numbers from the list. If you only discussed stories 1 and 4, output: 1,4
+`;
 
   const geminiKey = process.env.GEMINI_API_KEY;
   if (!geminiKey) {
@@ -115,7 +144,7 @@ async function runNewsAgent() {
 
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 1000 },
+    generationConfig: { maxOutputTokens: 1200 },
   });
 
   type GeminiResponse = {
@@ -148,25 +177,44 @@ async function runNewsAgent() {
   }
 
   const parts = data.candidates?.[0]?.content?.parts;
-  const finalScript =
+  const rawOut =
     parts?.map((p) => p.text).filter(Boolean).join('') ?? '';
-  if (!finalScript) {
+  if (!rawOut) {
     throw new Error(`Gemini returned no text: ${JSON.stringify(data)}`);
   }
 
-  const linksText = collected
-    .filter((c) => c.link)
-    .map((c, i) => `${i + 1}. ${c.title}\n   ${c.link}`)
+  const { script: finalScript, indices } = parseScriptAndSources(
+    rawOut,
+    collected.length
+  );
+
+  const used = indices
+    .map((i) => collected[i - 1])
+    .filter(Boolean)
+    .filter((c) => c.link);
+
+  if (!indices.length) {
+    console.warn(
+      'No <<<SOURCES>>> line parsed — email will omit screenshot links (check model output).'
+    );
+  } else {
+    console.log('Sources used for segment (screenshots):', indices.join(', '));
+  }
+
+  const linksText = used
+    .map((c, i) => `${i + 1}. [${c.section}] ${c.title}\n   ${c.link}`)
     .join('\n\n');
 
-  const linksHtml = `<ul style="padding-left:1.2em;line-height:1.5">${collected
-    .filter((c) => c.link)
-    .map(
-      (c) =>
-        `<li style="margin-bottom:0.6em"><span style="color:#666">[${escapeHtml(c.section)}]</span> ` +
-        `<strong>${escapeHtml(c.title)}</strong><br><a href="${escapeHtml(c.link)}">${escapeHtml(c.link)}</a></li>`
-    )
-    .join('')}</ul>`;
+  const linksHtml =
+    used.length > 0
+      ? `<ul style="padding-left:1.2em;line-height:1.5">${used
+          .map(
+            (c) =>
+              `<li style="margin-bottom:0.6em"><span style="color:#666">[${escapeHtml(c.section)}]</span> ` +
+              `<strong>${escapeHtml(c.title)}</strong><br><a href="${escapeHtml(c.link)}">${escapeHtml(c.link)}</a></li>`
+          )
+          .join('')}</ul>`
+      : `<p style="color:#888;font-size:13px">No parsed source list — model did not return <<<SOURCES>>> lines, or no URLs in those items.</p>`;
 
   const resendKey = process.env.RESEND_API_KEY;
   const toRaw = process.env.RESEND_TO?.trim();
@@ -183,13 +231,18 @@ async function runNewsAgent() {
   const to = toRaw.split(',').map((a) => a.trim()).filter(Boolean);
   const resend = new Resend(resendKey);
 
-  const emailText = `${finalScript}\n\n---\nSOURCE LINKS\n\n${linksText || '(no links in feed items)'}`;
+  const linksHeader =
+    used.length > 0
+      ? 'SOURCE LINKS (for this segment — screenshots / posts)'
+      : 'SOURCE LINKS (none parsed — see log)';
+
+  const emailText = `${finalScript}\n\n---\n${linksHeader}\n\n${linksText || '(none)'}`;
 
   const emailHtml =
     `<div style="font-family:system-ui,sans-serif;max-width:640px">` +
     `<pre style="white-space:pre-wrap;font-size:14px;line-height:1.45">${escapeHtml(finalScript)}</pre>` +
     `<hr style="border:none;border-top:1px solid #ddd;margin:1.5em 0" />` +
-    `<p style="font-size:13px;color:#555">Source links (RSS)</p>` +
+    `<p style="font-size:13px;color:#555">${escapeHtml(linksHeader)}</p>` +
     linksHtml +
     `</div>`;
 
@@ -207,7 +260,7 @@ async function runNewsAgent() {
 
   console.log('Mission accomplished. Resend id:', sendData?.id);
   if (linksText) {
-    console.log('\n--- Links ---\n' + linksText);
+    console.log('\n--- Segment links ---\n' + linksText);
   }
 }
 
