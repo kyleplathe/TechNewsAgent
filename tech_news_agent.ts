@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import Parser from 'rss-parser';
+import { parseFeedUrl } from './feed';
 import { Resend } from 'resend';
 
 function escapeHtml(s: string): string {
@@ -9,8 +9,6 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
-
-const parser = new Parser();
 
 type Collected = {
   section: 'TECH' | 'LOCAL';
@@ -37,8 +35,8 @@ async function runNewsAgent() {
   ): Promise<void> {
     for (const url of urls) {
       try {
-        const feed = await parser.parseURL(url);
-        const title = feed.title ?? url;
+        const feed = await parseFeedUrl(url);
+        const title = feed.title || url;
         for (const item of feed.items.slice(0, 3)) {
           if (!item.title) continue;
           collected.push({
