@@ -129,7 +129,10 @@ SCRIPT RULES (Final Cut / teleprompter — match this energy):
 2) **THEN WOLVES** — one clear transition (e.g. NOW FOR OUR TIMBERWOLVES CHECK-IN, or TIME FOR THE WOLVES). Standings, recent games, vibe — from the **[LOCAL]** Wolves RSS items only.
 3) **THEN LINDEN HILLS NEIGHBORHOOD** — coffee, shops, blocks, Lake Harriet energy — **after** tech and Wolves. Do not put neighborhood beats before the Wolves segment.
 
-- **Hard words / brands:** Use **spaced-letter spelling** plus a hyphen guide in parens when helpful, e.g. O P E N C O D E (O-PEN-CODE) or M A M B A (M-A-M-B-A).
+- **Enunciation (phonetics):** For tough names, brands, or acronyms, add **one** clear cue — don’t stack two different systems on the same word.
+  - **Default (best on prompter):** Right after the word, add **syllables with hyphens** in parentheses; **stress the stressed syllable in ALL CAPS** (common broadcast style). Examples: (oh-PEN-code), (MAM-buh), (en-VIDE-ee-uh) for NVIDIA.
+  - **Spelled-out letters:** Use only for true acronyms you read as letters — e.g. A I or G P U with spaces — not for full product names.
+  - **Don’t do:** O P E N C O D E plus (O-PEN-CODE) on the same line — redundant and hard to read. Pick syllable guide OR letter spacing, not both.
 - **Video direction:** On their own lines, in caps, e.g. [B-ROLL: OPencode.ai website], [LOWER THIRD: MAMBA-3 AI], [CAM: CLOSE UP ON A WORKBENCH], [CUT TO: SHOT OF LAKE HARRIET]. Keep them short.
 
 - END with: BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
