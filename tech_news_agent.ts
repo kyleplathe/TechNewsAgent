@@ -118,13 +118,17 @@ QUALITY RULES:
 - Do not invent products, prices, or dates. Stay close to the headlines.
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
 - The only **local RSS** input is **Wolves / NBA** — use it for the basketball beat. **Linden Hills** — the shops, blocks, and neighborhood feel (near Lake Harriet, the usual haunts) — is **your on-camera color**, not something to pull from a city news feed.
-- Mix **tech** with **one Wolves** beat; keep it tight for **about 60 seconds** read aloud.
+- Keep it tight for **about 60 seconds** read aloud.
 
 SCRIPT RULES (Final Cut / teleprompter — match this energy):
 - **The entire on-camera script must be in ALL CAPS**, one thought per paragraph block, short lines. That includes text inside **[SQUARE BRACKETS]** for video cues.
 - START exactly with: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
-- Use a clear tech handoff like **FIRST UP IN TECH,** or **AND SPEAKING OF AI,** between beats when it fits.
-- Include a **Wolves check-in** (43–27, 4th in the West — update if you know better) and a **Linden Hills** neighborhood beat (coffee, shops, blocks — real, not generic city news).
+
+**SEGMENT ORDER (do not reorder):**
+1) **TECH FIRST — all tech stories** you’re covering (use FIRST UP IN TECH, AND NEXT IN TECH, AND SPEAKING OF AI, etc.). No Wolves or neighborhood color in this block yet — only tech headlines and their [B-ROLL] / [LOWER THIRD] cues.
+2) **THEN WOLVES** — one clear transition (e.g. NOW FOR OUR TIMBERWOLVES CHECK-IN, or TIME FOR THE WOLVES). Standings, recent games, vibe — from the **[LOCAL]** Wolves RSS items only.
+3) **THEN LINDEN HILLS NEIGHBORHOOD** — coffee, shops, blocks, Lake Harriet energy — **after** tech and Wolves. Do not put neighborhood beats before the Wolves segment.
+
 - **Hard words / brands:** Use **spaced-letter spelling** plus a hyphen guide in parens when helpful, e.g. O P E N C O D E (O-PEN-CODE) or M A M B A (M-A-M-B-A).
 - **Video direction:** On their own lines, in caps, e.g. [B-ROLL: OPencode.ai website], [LOWER THIRD: MAMBA-3 AI], [CAM: CLOSE UP ON A WORKBENCH], [CUT TO: SHOT OF LAKE HARRIET]. Keep them short.
 
