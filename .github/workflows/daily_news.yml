@@ -39,4 +39,6 @@ jobs:
           RESEND_TO: ${{ secrets.RESEND_TO }}
           # Optional override, e.g. "Name <noreply@your-verified-domain.com>"
           RESEND_FROM: ${{ secrets.RESEND_FROM }}
+          # Optional: stories per feed (default 6). Repo variable FEED_ITEM_LIMIT or omit.
+          FEED_ITEM_LIMIT: ${{ vars.FEED_ITEM_LIMIT }}
         run: npx tsx tech_news_agent.ts

@@ -18,9 +18,17 @@ type Collected = {
 };
 
 async function runNewsAgent() {
+  /** How many stories to take per feed (default 6 — old HN-only flow used ~8 from the front page). Override: FEED_ITEM_LIMIT=8 */
+  const perFeed = Math.min(
+    20,
+    Math.max(1, parseInt(process.env.FEED_ITEM_LIMIT ?? '6', 10) || 6)
+  );
+
   const techFeeds = [
     'https://news.ycombinator.com/rss',
     'https://feeds.arstechnica.com/arstechnica/index',
+    'https://www.theverge.com/rss/index.xml',
+    'https://techcrunch.com/feed/',
   ];
   const localFeeds = [
     'https://www.southwestjournal.com/feed/',
@@ -37,7 +45,15 @@ async function runNewsAgent() {
       try {
         const feed = await parseFeedUrl(url);
         const title = feed.title || url;
-        for (const item of feed.items.slice(0, 3)) {
+        const slice = feed.items.slice(0, perFeed);
+        if (!slice.length) {
+          console.warn(`No items parsed from feed (${url}) — check format.`);
+        } else {
+          const head =
+            title.length > 52 ? `${title.slice(0, 52)}…` : title;
+          console.log(`  ${head} → ${slice.length} stories (cap ${perFeed})`);
+        }
+        for (const item of slice) {
           if (!item.title) continue;
           collected.push({
             section,
