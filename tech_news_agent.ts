@@ -54,10 +54,8 @@ async function runNewsAgent() {
     'https://feeds.arstechnica.com/arstechnica/index',
     'https://www.theverge.com/rss/index.xml',
   ];
-  const localFeeds = [
-    'https://www.southwestjournal.com/feed/',
-    'https://www.canishoopus.com/rss/current.xml',
-  ];
+  /** Local = Wolves only (no neighborhood paper — avoids non-tech city/gossip). */
+  const localFeeds = ['https://www.canishoopus.com/rss/current.xml'];
 
   const collected: Collected[] = [];
 
@@ -118,7 +116,9 @@ QUALITY RULES:
 - Pick only the **3–5 strongest stories** to actually talk about. Skip the rest — depth beats a laundry list.
 - If a headline includes a year like "(2024)", that is usually the article’s original date, not “breaking today.” Say “making the rounds” or “people are digging into…” unless it’s clearly new.
 - Do not invent products, prices, or dates. Stay close to the headlines.
-- Mix **tech** with **one local / Wolves** beat; keep it tight for **about 60 seconds** read aloud.
+- **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
+- The only **local RSS** input is **Wolves / NBA** — use it for the basketball beat. **Southwest Minneapolis** (Lake Harriet, shops, neighborhood) is **your on-camera color**, not something to pull from a city news feed.
+- Mix **tech** with **one Wolves** beat; keep it tight for **about 60 seconds** read aloud.
 
 SCRIPT RULES:
 - START with: "Live from the bench in Linden Hills, I'm Kyle. We've got a lot hitting the shop today."
