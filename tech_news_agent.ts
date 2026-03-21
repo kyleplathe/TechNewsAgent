@@ -23,7 +23,12 @@ async function runNewsAgent() {
 
   await browser.close();
 
-  // 3. GENERATE SCRIPT WITH CLAUDE
+  // 3. GENERATE SCRIPT (Google Gemini — Google AI Studio free tier; key: https://aistudio.google.com/apikey )
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey) {
+    throw new Error('Set GEMINI_API_KEY (Google AI Studio → Get API key)');
+  }
+
   const prompt = `
     You are a high-energy tech news anchor for a daily vlog.
     Context:
@@ -37,34 +42,38 @@ async function runNewsAgent() {
     - Style: Use teleprompter formatting (short lines, ALL CAPS for emphasis).
   `;
 
-  const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
+  const model = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+
+  const aiResponse = await fetch(url, {
     method: 'POST',
-    headers: {
-      'x-api-key': process.env.ANTHROPIC_API_KEY!,
-      'content-type': 'application/json',
-      'anthropic-version': '2023-06-01'
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }]
-    })
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 1000 },
+    }),
   });
 
   const data = (await aiResponse.json()) as {
-    content?: Array<{ type: string; text?: string }>;
-    error?: { message?: string; type?: string };
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+    error?: { message?: string; code?: number };
+    promptFeedback?: { blockReason?: string };
   };
 
   if (!aiResponse.ok) {
     const msg = data.error?.message ?? JSON.stringify(data);
-    throw new Error(`Anthropic API ${aiResponse.status}: ${msg}`);
+    throw new Error(`Gemini API ${aiResponse.status}: ${msg}`);
   }
 
-  const textBlock = data.content?.find((b) => b.type === 'text' && b.text);
-  const finalScript = textBlock?.text;
+  const parts = data.candidates?.[0]?.content?.parts;
+  const finalScript = parts?.map((p) => p.text).filter(Boolean).join('') ?? '';
   if (!finalScript) {
-    throw new Error(`Anthropic returned no text: ${JSON.stringify(data)}`);
+    const blocked =
+      data.promptFeedback?.blockReason ??
+      (data.candidates?.[0] as { finishReason?: string } | undefined)?.finishReason;
+    throw new Error(
+      `Gemini returned no text${blocked ? ` (${blocked})` : ''}: ${JSON.stringify(data)}`
+    );
   }
 
   // 4. SEND TO YOUR INBOX VIA RESEND

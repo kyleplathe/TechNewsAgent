@@ -34,7 +34,8 @@ jobs:
 
       - name: Run News Agent
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Google AI Studio (free tier): https://aistudio.google.com/apikey
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # If you use Resend to email the script to yourself:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: npx tsx tech_news_agent.ts
