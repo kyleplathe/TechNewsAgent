@@ -17,28 +17,54 @@ type Collected = {
   link: string;
 };
 
-/** Split model output into teleprompter script + 1-based story indices for links. */
-function parseScriptAndSources(
-  raw: string,
-  maxIndex: number
-): { script: string; indices: number[] } {
-  const marker = '<<<SOURCES>>>';
-  const pos = raw.indexOf(marker);
-  if (pos === -1) {
-    return { script: raw.trim(), indices: [] };
-  }
-  const script = raw.slice(0, pos).trim();
-  const after = raw.slice(pos + marker.length).trim();
-  const numLine = after.split(/\n/)[0] ?? '';
+const M_VIDEO = '<<<VIDEO_PROMPT>>>';
+const M_ONAIR = '<<<ON_AIR>>>';
+const M_SOURCES = '<<<SOURCES>>>';
+
+function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
+  const numLine = afterSources.split(/\n/)[0] ?? '';
   const indices = numLine
     .split(/[,;\s]+/)
     .map((s) => parseInt(s.trim(), 10))
     .filter((n) => Number.isFinite(n) && n >= 1 && n <= maxIndex);
   const seen = new Set<number>();
-  const unique = indices.filter((n) =>
+  return indices.filter((n) =>
     seen.has(n) ? false : (seen.add(n), true)
   );
-  return { script, indices: unique };
+}
+
+/**
+ * Studio layout: VIDEO PROMPT (edit) → ON AIR (VO) → SOURCES (indices).
+ * Backward compatible: if markers missing, whole body before SOURCES = onAir only.
+ */
+function parseStudioOutput(
+  raw: string,
+  maxIndex: number
+): { videoPrompt: string; onAir: string; indices: number[] } {
+  const srcPos = raw.indexOf(M_SOURCES);
+  let body = raw.trim();
+  let indices: number[] = [];
+
+  if (srcPos >= 0) {
+    body = raw.slice(0, srcPos).trim();
+    const after = raw.slice(srcPos + M_SOURCES.length).trim();
+    indices = parseSourceIndices(after, maxIndex);
+  }
+
+  const vp = body.indexOf(M_VIDEO);
+  const oa = body.indexOf(M_ONAIR);
+
+  if (vp >= 0 && oa > vp) {
+    const videoPrompt = body.slice(vp + M_VIDEO.length, oa).trim();
+    const onAir = body.slice(oa + M_ONAIR.length).trim();
+    return { videoPrompt, onAir, indices };
+  }
+  if (oa >= 0) {
+    const onAir = body.slice(oa + M_ONAIR.length).trim();
+    return { videoPrompt: '', onAir, indices };
+  }
+
+  return { videoPrompt: '', onAir: body, indices };
 }
 
 /** Gemini free tier often returns 429 with "Please retry in Xs" — parse that for backoff. */
@@ -127,28 +153,41 @@ QUALITY RULES:
 - The only **local RSS** input is **Wolves / NBA** — use it for the basketball beat. **Linden Hills** — the shops, blocks, and neighborhood feel (near Lake Harriet, the usual haunts) — is **your on-camera color**, not something to pull from a city news feed.
 - Keep it tight for **about 60 seconds** read aloud.
 
-SCRIPT RULES (Final Cut / teleprompter — match this energy):
-- **The entire on-camera script must be in ALL CAPS**, one thought per paragraph block, short lines. That includes text inside **[SQUARE BRACKETS]** for video cues.
-- START exactly with: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
+You are writing for a **small professional studio**: one column is the **video / post prompt** (for Final Cut), the other is **on-air copy** (teleprompter / VO only).
 
-**SEGMENT ORDER (do not reorder):**
-1) **TECH FIRST — all tech stories** you’re covering (use FIRST UP IN TECH, AND NEXT IN TECH, AND SPEAKING OF AI, etc.). No Wolves or neighborhood color in this block yet — only tech headlines and their [B-ROLL] / [LOWER THIRD] cues.
-2) **THEN WOLVES** — one clear transition (e.g. NOW FOR OUR TIMBERWOLVES CHECK-IN, or TIME FOR THE WOLVES). Standings, recent games, vibe — from the **[LOCAL]** Wolves RSS items only.
-3) **THEN LINDEN HILLS NEIGHBORHOOD** — coffee, shops, blocks, Lake Harriet energy — **after** tech and Wolves. Do not put neighborhood beats before the Wolves segment.
+**SEGMENT ORDER (same in both columns — do not reorder):**
+1) **TECH** first (all tech beats).
+2) **THEN WOLVES** (Timberwolves — from **[LOCAL]** RSS only).
+3) **THEN LINDEN HILLS** neighborhood color (coffee, shops, Lake Harriet — spoken vibe, not city paper gossip).
 
-- **Enunciation (phonetics):** For tough names, brands, or acronyms, add **one** clear cue — don’t stack two different systems on the same word.
-  - **Default (best on prompter):** Right after the word, add **syllables with hyphens** in parentheses; **stress the stressed syllable in ALL CAPS** (common broadcast style). Examples: (oh-PEN-code), (MAM-buh), (en-VIDE-ee-uh) for NVIDIA.
-  - **Spelled-out letters:** Use only for true acronyms you read as letters — e.g. A I or G P U with spaces — not for full product names.
-  - **Don’t do:** O P E N C O D E plus (O-PEN-CODE) on the same line — redundant and hard to read. Pick syllable guide OR letter spacing, not both.
-- **Video direction:** On their own lines, in caps, e.g. [B-ROLL: OPencode.ai website], [LOWER THIRD: MAMBA-3 AI], [CAM: CLOSE UP ON A WORKBENCH], [CUT TO: SHOT OF LAKE HARRIET]. Keep them short.
+---
 
-- END with: BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
+**COLUMN A — VIDEO PROMPT (for editor / Final Cut / screenshots):**
+- Write like a **shot list + post brief**: numbered or short lines. Use clear labels: **CAM**, **B-ROLL**, **GFX**, **LOWER THIRD**, **FULL SCREEN**, **CUT**, **HOLD**, **SOT** if needed.
+- Match the same story order as VO: tech block, Wolves block, Linden Hills block.
+- Reference URLs or domains where useful for grab/screenshot (e.g. “B-roll: homepage opencode.ai”).
+- This block is **not** read on camera — it’s for **you / the edit**.
 
-OUTPUT FORMAT (critical):
-1) Write ONLY the on-camera script first (no preamble, no bullet list of sources in the body).
-2) Then on its own line put exactly: <<<SOURCES>>>
-3) Then ONE line of comma-separated numbers — the **1-based story numbers** from the list above that you **actually mentioned or clearly relied on** in the script (for B-roll/screenshots). Example: 2,5,7
-- Only include numbers from the list. If you only discussed stories 1 and 4, output: 1,4
+---
+
+**COLUMN B — ON AIR (teleprompter / voiceover — spoken words only):**
+- **ALL CAPS.** Short lines. **Do not put [B-ROLL] or shot notes here** — those belong in VIDEO PROMPT only.
+- START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
+- **Enunciation:** After tricky names, one syllable guide in parens with stress in ALL CAPS: (oh-PEN-code), (MAM-buh). Spelled letters only for real acronyms (A I, G P U).
+- END exactly: BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
+
+---
+
+**OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
+
+<<<VIDEO_PROMPT>>>
+(Professional shot list / post brief here — CAM, B-ROLL, GFX, LOWER THIRD, etc. Same segment order: tech → Wolves → Linden Hills.)
+
+<<<ON_AIR>>>
+(ALL CAPS spoken script only — no bracketed shot notes here.)
+
+<<<SOURCES>>>
+(Exactly **one line** after this marker: comma-separated 1-based story numbers from the list above, e.g. 2,5,7 — no other text on that line.)
 `;
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -161,7 +200,7 @@ OUTPUT FORMAT (critical):
 
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 1500 },
+    generationConfig: { maxOutputTokens: 2200 },
   });
 
   type GeminiResponse = {
@@ -231,7 +270,7 @@ OUTPUT FORMAT (critical):
     );
   }
 
-  const { script: finalScript, indices } = parseScriptAndSources(
+  const { videoPrompt, onAir: finalScript, indices } = parseStudioOutput(
     rawOut,
     collected.length
   );
@@ -241,6 +280,11 @@ OUTPUT FORMAT (critical):
     .filter(Boolean)
     .filter((c) => c.link);
 
+  if (!videoPrompt.trim()) {
+    console.warn(
+      'No <<<VIDEO_PROMPT>>> block parsed — check model output for studio format.'
+    );
+  }
   if (!indices.length) {
     console.warn(
       'No <<<SOURCES>>> line parsed — email will omit screenshot links (check model output).'
@@ -285,12 +329,28 @@ OUTPUT FORMAT (critical):
       ? 'SOURCE LINKS (for this segment — screenshots / posts)'
       : 'SOURCE LINKS (none parsed — see log)';
 
-  const emailText = `${finalScript}\n\n${linksHeader}\n\n${linksText || '(none)'}`;
+  const videoHeader = 'VIDEO PROMPT (edit / Final Cut / post)';
+  const onAirHeader = 'ON AIR (teleprompter / VO)';
+
+  const emailText = [
+    videoHeader,
+    videoPrompt.trim() || '(none — check model output)',
+    '',
+    onAirHeader,
+    finalScript.trim(),
+    '',
+    linksHeader,
+    '',
+    linksText || '(none)',
+  ].join('\n');
 
   const emailHtml =
-    `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;max-width:720px;color:#111">` +
-    `<pre style="white-space:pre-wrap;font-size:13px;line-height:1.5;margin:0 0 1.25em">${escapeHtml(finalScript)}</pre>` +
-    `<p style="font-family:system-ui,sans-serif;font-size:13px;font-weight:600;margin:0 0 0.75em;color:#333">${escapeHtml(linksHeader)}</p>` +
+    `<div style="font-family:system-ui,sans-serif;max-width:760px;color:#111">` +
+    `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(videoHeader)}</p>` +
+    `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.45;margin:0 0 1.5em;padding:12px;background:#f6f7f8;border-radius:8px;border:1px solid #e8e8e8">${escapeHtml(videoPrompt.trim() || '(none)')}</pre>` +
+    `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(onAirHeader)}</p>` +
+    `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd">${escapeHtml(finalScript.trim())}</pre>` +
+    `<p style="font-size:12px;font-weight:700;color:#444;margin:0 0 0.5em">${escapeHtml(linksHeader)}</p>` +
     `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.45">${linksHtml}</div>` +
     `</div>`;
 
@@ -307,6 +367,9 @@ OUTPUT FORMAT (critical):
   }
 
   console.log('Mission accomplished. Resend id:', sendData?.id);
+  if (videoPrompt.trim()) {
+    console.log('\n--- VIDEO PROMPT ---\n' + videoPrompt.trim());
+  }
   if (linksText) {
     console.log('\n--- Segment links ---\n' + linksText);
   }
