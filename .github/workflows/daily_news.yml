@@ -28,9 +28,7 @@ jobs:
           node-version: 24
 
       - name: Install dependencies
-        run: |
-          npm install
-          npx playwright install chromium
+        run: npm install
 
       - name: Run News Agent
         env:
