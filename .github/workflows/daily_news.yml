@@ -1,0 +1,31 @@
+name: Daily Tech News Agent
+
+on:
+  schedule:
+    # This runs at 13:00 UTC (8:00 AM CST) every day
+    - cron: '0 13 * * *'
+  workflow_dispatch: # Allows you to run it manually for testing
+
+jobs:
+  scrape_and_script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: latest
+
+      - name: Install dependencies
+        run: |
+          npm install
+          npx playwright install chromium
+
+      - name: Run News Agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # If you use Resend to email the script to yourself:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: npx tsx tech_news_agent.ts
