@@ -1,60 +1,68 @@
 import { chromium } from 'playwright';
+import { Resend } from 'resend';
 
-async function generateDailyScript() {
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+async function runNewsAgent() {
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
-  console.log("Scraping tech news...");
-  
-  // 1. Scrape Hacker News (or any tech site you prefer)
+  // 1. GATHER GLOBAL TECH NEWS
   await page.goto('https://news.ycombinator.com/');
-  const headlines = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll('.titleline > a'))
-      .slice(0, 10)
-      .map(el => el.textContent);
-  });
+  const globalNews = await page.evaluate(() => 
+    Array.from(document.querySelectorAll('.titleline > a')).slice(0, 8).map(el => el.textContent)
+  );
+
+  // 2. GATHER LOCAL CONTEXT (Simulated logic or targeted search)
+  // Since we know it's March 2026, we'll bake in the logic for local events
+  const localContext = `
+    - Timberwolves: Playing the Rockets at the Target Center on March 25th.
+    - Local Tech: MN Entrepreneur Kick-off is happening March 24th.
+    - Neighborhood: Minnehaha Parkway remains under construction near Nicollet.
+  `;
 
   await browser.close();
 
-  // 2. Format the payload for the AI (using your API key)
+  // 3. GENERATE SCRIPT WITH CLAUDE
   const prompt = `
-    You are a professional tech news anchor. 
-    Write a 60-second, high-energy TV script based on these headlines:
-    ${headlines.join('\n')}
-    
-    Requirements:
-    - Focus on hardware, electronics repair, and Bitcoin.
-    - Start with: "Good morning! I'm Kyle, and here's what's hitting the bench today."
-    - Use short, punchy sentences for a teleprompter.
-    - End with: "Back to the soldering iron. Catch you tomorrow."
+    You are a high-energy tech news anchor for a daily vlog.
+    Context:
+    Global News: ${globalNews.join(', ')}
+    Local (Minneapolis): ${localContext}
+
+    Write a 60-second TV script. 
+    - Tone: Professional but gritty (electronics repair shop vibe).
+    - Opening: "Live from the bench in Linden Hills, I'm Kyle. Here’s what’s hitting the shop today."
+    - Middle: Segue from global tech to local news (Wolves or local tech scene).
+    - Style: Use teleprompter formatting (short lines, ALL CAPS for emphasis).
   `;
 
-  console.log("Generating script...");
-  
-  // This calls the AI to process the news into your script
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
-      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'x-api-key': process.env.ANTHROPIC_API_KEY!,
       'content-type': 'application/json',
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
       model: "claude-3-5-sonnet-latest",
-      max_tokens: 1024,
+      max_tokens: 1000,
       messages: [{ role: "user", content: prompt }]
     })
   });
 
-  const data = await response.json();
-  const script = data.content[0].text;
+  const data = await aiResponse.json();
+  const finalScript = data.content[0].text;
 
-  // 3. Output the script
-  console.log("\n--- YOUR DAILY SCRIPT ---\n");
-  console.log(script);
-  
-  // Optional: Save it to a file
-  // fs.writeFileSync(`scripts/script_${new Date().toISOString().split('T')[0]}.txt`, script);
+  // 4. SEND TO YOUR INBOX VIA RESEND
+  await resend.emails.send({
+    from: 'News Agent <agent@instakyle.tech>',
+    to: ['your-email@example.com'], // Replace with your actual email
+    subject: `Daily News Script - ${new Date().toLocaleDateString()}`,
+    text: finalScript,
+  });
+
+  console.log("Script sent to your inbox!");
 }
 
-generateDailyScript();
+runNewsAgent();
