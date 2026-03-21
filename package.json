@@ -2,6 +2,9 @@
   "name": "tech-news-agent",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "tsx tech_news_agent.ts",
     "test:email": "tsx scripts/test-email.ts"
