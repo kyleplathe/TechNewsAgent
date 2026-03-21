@@ -21,15 +21,22 @@ if (!toRaw) {
 const to = toRaw.split(',').map((a) => a.trim()).filter(Boolean);
 const resend = new Resend(resendKey);
 
-const { data, error } = await resend.emails.send({
-  from,
-  to,
-  subject: 'TechNewsAgent — Resend test',
-  text: 'If this landed in your inbox, email delivery is configured correctly.',
-});
+async function main() {
+  const { data, error } = await resend.emails.send({
+    from,
+    to,
+    subject: 'TechNewsAgent — Resend test',
+    text: 'If this landed in your inbox, email delivery is configured correctly.',
+  });
 
-if (error) {
-  throw new Error(`Resend: ${error.message} (${error.name})`);
+  if (error) {
+    throw new Error(`Resend: ${error.message} (${error.name})`);
+  }
+
+  console.log('OK — email queued. Resend id:', data?.id);
 }
 
-console.log('OK — email queued. Resend id:', data?.id);
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
