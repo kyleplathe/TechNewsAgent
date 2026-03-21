@@ -45,14 +45,27 @@ async function runNewsAgent() {
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: "claude-3-5-sonnet-latest",
+      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-20250514',
       max_tokens: 1000,
       messages: [{ role: "user", content: prompt }]
     })
   });
 
-  const data = await aiResponse.json();
-  const finalScript = data.content[0].text;
+  const data = (await aiResponse.json()) as {
+    content?: Array<{ type: string; text?: string }>;
+    error?: { message?: string; type?: string };
+  };
+
+  if (!aiResponse.ok) {
+    const msg = data.error?.message ?? JSON.stringify(data);
+    throw new Error(`Anthropic API ${aiResponse.status}: ${msg}`);
+  }
+
+  const textBlock = data.content?.find((b) => b.type === 'text' && b.text);
+  const finalScript = textBlock?.text;
+  if (!finalScript) {
+    throw new Error(`Anthropic returned no text: ${JSON.stringify(data)}`);
+  }
 
   // 4. SEND TO YOUR INBOX VIA RESEND
   await resend.emails.send({
