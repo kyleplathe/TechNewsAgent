@@ -6,6 +6,7 @@
     "start": "tsx tech_news_agent.ts"
   },
   "dependencies": {
+    "dotenv": "^16.4.7",
     "playwright": "^1.51.0",
     "resend": "^6.9.4"
   },
