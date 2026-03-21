@@ -120,15 +120,15 @@ QUALITY RULES:
 - The only **local RSS** input is **Wolves / NBA** — use it for the basketball beat. **Linden Hills** — the shops, blocks, and neighborhood feel (near Lake Harriet, the usual haunts) — is **your on-camera color**, not something to pull from a city news feed.
 - Mix **tech** with **one Wolves** beat; keep it tight for **about 60 seconds** read aloud.
 
-SCRIPT RULES:
-- START with: "Live from the bench in Linden Hills, I'm Kyle. We've got a lot hitting the shop today."
-- Include a short **Wolves check-in** (team is 43–27, 4th in the West — adjust if you know it changed).
-- Include a **Linden Hills neighborhood** nod — shops, streets, neighbors, coffee, whatever feels real for the day (not generic “city news”).
-- STYLE: teleprompter-friendly — short lines, ALL CAPS for emphasis.
-- **Hard words / names:** Use **spaced-letter spelling** (letters separated by spaces: e.g. A P P L E) — also called **letter-by-letter** or **oral spelling** on prompters. For whole-word pronunciation guides, use **phonetic respelling** (sounds-like in parentheses). Pick one approach per tough term so it’s easy to read cold.
-- **Video direction (optional, brief):** In [square brackets], add 2–4 light cues where useful — e.g. [B-ROLL: article on screen], [CAM: tight on bench], [LOWER THIRD: story title], [PAUSE], [CUT TO: product shot]. Keep them short; the script stays readable aloud.
+SCRIPT RULES (Final Cut / teleprompter — match this energy):
+- **The entire on-camera script must be in ALL CAPS**, one thought per paragraph block, short lines. That includes text inside **[SQUARE BRACKETS]** for video cues.
+- START exactly with: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
+- Use a clear tech handoff like **FIRST UP IN TECH,** or **AND SPEAKING OF AI,** between beats when it fits.
+- Include a **Wolves check-in** (43–27, 4th in the West — update if you know better) and a **Linden Hills** neighborhood beat (coffee, shops, blocks — real, not generic city news).
+- **Hard words / brands:** Use **spaced-letter spelling** plus a hyphen guide in parens when helpful, e.g. O P E N C O D E (O-PEN-CODE) or M A M B A (M-A-M-B-A).
+- **Video direction:** On their own lines, in caps, e.g. [B-ROLL: OPencode.ai website], [LOWER THIRD: MAMBA-3 AI], [CAM: CLOSE UP ON A WORKBENCH], [CUT TO: SHOT OF LAKE HARRIET]. Keep them short.
 
-- END with: "Back to the soldering iron. Catch you tomorrow."
+- END with: BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
 
 OUTPUT FORMAT (critical):
 1) Write ONLY the on-camera script first (no preamble, no bullet list of sources in the body).
@@ -147,7 +147,7 @@ OUTPUT FORMAT (critical):
 
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 1200 },
+    generationConfig: { maxOutputTokens: 1500 },
   });
 
   type GeminiResponse = {
@@ -204,19 +204,20 @@ OUTPUT FORMAT (critical):
     console.log('Sources used for segment (screenshots):', indices.join(', '));
   }
 
+  /** Plain text: [SECTION] Title then URL on next line (matches FCP / screenshot workflow). */
   const linksText = used
-    .map((c, i) => `${i + 1}. [${c.section}] ${c.title}\n   ${c.link}`)
+    .map((c) => `[${c.section}] ${c.title}\n${c.link}`)
     .join('\n\n');
 
   const linksHtml =
     used.length > 0
-      ? `<ul style="padding-left:1.2em;line-height:1.5">${used
+      ? used
           .map(
             (c) =>
-              `<li style="margin-bottom:0.6em"><span style="color:#666">[${escapeHtml(c.section)}]</span> ` +
-              `<strong>${escapeHtml(c.title)}</strong><br><a href="${escapeHtml(c.link)}">${escapeHtml(c.link)}</a></li>`
+              `<p style="margin:0 0 0.15em;font-size:14px;line-height:1.4">[${escapeHtml(c.section)}] ${escapeHtml(c.title)}</p>` +
+              `<p style="margin:0 0 1.1em;font-size:13px;word-break:break-all"><a href="${escapeHtml(c.link)}">${escapeHtml(c.link)}</a></p>`
           )
-          .join('')}</ul>`
+          .join('')
       : `<p style="color:#888;font-size:13px">No parsed source list — model did not return <<<SOURCES>>> lines, or no URLs in those items.</p>`;
 
   const resendKey = process.env.RESEND_API_KEY;
@@ -239,14 +240,13 @@ OUTPUT FORMAT (critical):
       ? 'SOURCE LINKS (for this segment — screenshots / posts)'
       : 'SOURCE LINKS (none parsed — see log)';
 
-  const emailText = `${finalScript}\n\n---\n${linksHeader}\n\n${linksText || '(none)'}`;
+  const emailText = `${finalScript}\n\n${linksHeader}\n\n${linksText || '(none)'}`;
 
   const emailHtml =
-    `<div style="font-family:system-ui,sans-serif;max-width:640px">` +
-    `<pre style="white-space:pre-wrap;font-size:14px;line-height:1.45">${escapeHtml(finalScript)}</pre>` +
-    `<hr style="border:none;border-top:1px solid #ddd;margin:1.5em 0" />` +
-    `<p style="font-size:13px;color:#555">${escapeHtml(linksHeader)}</p>` +
-    linksHtml +
+    `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;max-width:720px;color:#111">` +
+    `<pre style="white-space:pre-wrap;font-size:13px;line-height:1.5;margin:0 0 1.25em">${escapeHtml(finalScript)}</pre>` +
+    `<p style="font-family:system-ui,sans-serif;font-size:13px;font-weight:600;margin:0 0 0.75em;color:#333">${escapeHtml(linksHeader)}</p>` +
+    `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.45">${linksHtml}</div>` +
     `</div>`;
 
   const { data: sendData, error: sendErr } = await resend.emails.send({
