@@ -124,7 +124,10 @@ SCRIPT RULES:
 - START with: "Live from the bench in Linden Hills, I'm Kyle. We've got a lot hitting the shop today."
 - Include a short **Wolves check-in** (team is 43–27, 4th in the West — adjust if you know it changed).
 - Include a **Southwest Minneapolis** nod (Lake Harriet, coffee, neighborhood vibe).
-- STYLE: teleprompter-friendly — short lines, ALL CAPS for emphasis, phonetic spellings for tricky names.
+- STYLE: teleprompter-friendly — short lines, ALL CAPS for emphasis.
+- **Hard words / names:** Use **spaced-letter spelling** (letters separated by spaces: e.g. A P P L E) — also called **letter-by-letter** or **oral spelling** on prompters. For whole-word pronunciation guides, use **phonetic respelling** (sounds-like in parentheses). Pick one approach per tough term so it’s easy to read cold.
+- **Video direction (optional, brief):** In [square brackets], add 2–4 light cues where useful — e.g. [B-ROLL: article on screen], [CAM: tight on bench], [LOWER THIRD: story title], [PAUSE], [CUT TO: product shot]. Keep them short; the script stays readable aloud.
+
 - END with: "Back to the soldering iron. Catch you tomorrow."
 
 OUTPUT FORMAT (critical):
