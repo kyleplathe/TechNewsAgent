@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "tsx tech_news_agent.ts"
+    "start": "tsx tech_news_agent.ts",
+    "test:email": "tsx scripts/test-email.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

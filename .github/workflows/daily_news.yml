@@ -36,6 +36,9 @@ jobs:
         env:
           # Google AI Studio (free tier): https://aistudio.google.com/apikey
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # If you use Resend to email the script to yourself:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # Your real inbox (comma-separated). Required — old default was a placeholder.
+          RESEND_TO: ${{ secrets.RESEND_TO }}
+          # Optional override, e.g. "Name <noreply@your-verified-domain.com>"
+          RESEND_FROM: ${{ secrets.RESEND_FROM }}
         run: npx tsx tech_news_agent.ts

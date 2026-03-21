@@ -2,8 +2,6 @@ import 'dotenv/config';
 import { chromium } from 'playwright';
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 async function runNewsAgent() {
   const browser = await chromium.launch();
   const page = await browser.newPage();
@@ -113,14 +111,35 @@ async function runNewsAgent() {
   }
 
   // 4. SEND TO YOUR INBOX VIA RESEND
-  await resend.emails.send({
-    from: 'News Agent <agent@instakyle.tech>',
-    to: ['your-email@example.com'], // Replace with your actual email
-    subject: `Daily News Script - ${new Date().toLocaleDateString()}`,
+  const resendKey = process.env.RESEND_API_KEY;
+  const toRaw = process.env.RESEND_TO?.trim();
+  const from =
+    process.env.RESEND_FROM?.trim() || 'News Agent <agent@instakyle.tech>';
+
+  if (!resendKey) {
+    throw new Error('Set RESEND_API_KEY (Resend dashboard → API Keys)');
+  }
+  if (!toRaw) {
+    throw new Error(
+      'Set RESEND_TO to your inbox address (comma-separated for multiple). Was still using a placeholder.'
+    );
+  }
+
+  const to = toRaw.split(',').map((a) => a.trim()).filter(Boolean);
+  const resend = new Resend(resendKey);
+
+  const { data, error } = await resend.emails.send({
+    from,
+    to,
+    subject: `Daily News Script - ${new Date().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`,
     text: finalScript,
   });
 
-  console.log("Script sent to your inbox!");
+  if (error) {
+    throw new Error(`Resend: ${error.message} (${error.name})`);
+  }
+
+  console.log('Email sent. Resend id:', data?.id);
 }
 
 runNewsAgent();
