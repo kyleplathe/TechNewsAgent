@@ -1,10 +1,16 @@
 name: Daily Tech News Agent
 
-on:
+# Quote `on` so strict YAML parsers don't treat it as boolean true (YAML 1.1)
+'on':
+  push:
+    branches: [main]
   schedule:
     # This runs at 13:00 UTC (8:00 AM CST) every day
     - cron: '0 13 * * *'
   workflow_dispatch: # Allows you to run it manually for testing
+
+permissions:
+  contents: read
 
 jobs:
   scrape_and_script:
