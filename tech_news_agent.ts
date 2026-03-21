@@ -117,13 +117,13 @@ QUALITY RULES:
 - If a headline includes a year like "(2024)", that is usually the article’s original date, not “breaking today.” Say “making the rounds” or “people are digging into…” unless it’s clearly new.
 - Do not invent products, prices, or dates. Stay close to the headlines.
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
-- The only **local RSS** input is **Wolves / NBA** — use it for the basketball beat. **Southwest Minneapolis** (Lake Harriet, shops, neighborhood) is **your on-camera color**, not something to pull from a city news feed.
+- The only **local RSS** input is **Wolves / NBA** — use it for the basketball beat. **Linden Hills** — the shops, blocks, and neighborhood feel (near Lake Harriet, the usual haunts) — is **your on-camera color**, not something to pull from a city news feed.
 - Mix **tech** with **one Wolves** beat; keep it tight for **about 60 seconds** read aloud.
 
 SCRIPT RULES:
 - START with: "Live from the bench in Linden Hills, I'm Kyle. We've got a lot hitting the shop today."
 - Include a short **Wolves check-in** (team is 43–27, 4th in the West — adjust if you know it changed).
-- Include a **Southwest Minneapolis** nod (Lake Harriet, coffee, neighborhood vibe).
+- Include a **Linden Hills neighborhood** nod — shops, streets, neighbors, coffee, whatever feels real for the day (not generic “city news”).
 - STYLE: teleprompter-friendly — short lines, ALL CAPS for emphasis.
 - **Hard words / names:** Use **spaced-letter spelling** (letters separated by spaces: e.g. A P P L E) — also called **letter-by-letter** or **oral spelling** on prompters. For whole-word pronunciation guides, use **phonetic respelling** (sounds-like in parentheses). Pick one approach per tough term so it’s easy to read cold.
 - **Video direction (optional, brief):** In [square brackets], add 2–4 light cues where useful — e.g. [B-ROLL: article on screen], [CAM: tight on bench], [LOWER THIRD: story title], [PAUSE], [CUT TO: product shot]. Keep them short; the script stays readable aloud.
