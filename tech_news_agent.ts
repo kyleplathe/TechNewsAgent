@@ -43,37 +43,72 @@ async function runNewsAgent() {
     - Style: Use teleprompter formatting (short lines, ALL CAPS for emphasis).
   `;
 
-  const model = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+  // Default: gemini-2.5-flash-lite (stable, cost-efficient). Avoid gemini-2.0-* — deprecated
+  // and often shows free_tier limit:0 on AI Studio keys.
+  const model = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
 
-  const aiResponse = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 1000 },
-    }),
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { maxOutputTokens: 1000 },
   });
 
-  const data = (await aiResponse.json()) as {
+  type GeminiResponse = {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
     error?: { message?: string; code?: number };
     promptFeedback?: { blockReason?: string };
   };
 
-  if (!aiResponse.ok) {
-    const msg = data.error?.message ?? JSON.stringify(data);
-    throw new Error(`Gemini API ${aiResponse.status}: ${msg}`);
-  }
+  const parseRetrySeconds = (msg: string): number | null => {
+    const m = msg.match(/retry in ([\d.]+)\s*s/i);
+    return m ? parseFloat(m[1]) : null;
+  };
 
-  const parts = data.candidates?.[0]?.content?.parts;
-  const finalScript = parts?.map((p) => p.text).filter(Boolean).join('') ?? '';
-  if (!finalScript) {
+  const maxAttempts = 5;
+  let finalScript = '';
+  let lastStatus = 0;
+  let lastBody: GeminiResponse = {};
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const aiResponse = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+
+    const data = (await aiResponse.json()) as GeminiResponse;
+    lastStatus = aiResponse.status;
+    lastBody = data;
+
+    if (aiResponse.status === 429 && attempt < maxAttempts) {
+      const msg = data.error?.message ?? '';
+      const waitSec =
+        parseRetrySeconds(msg) ??
+        Math.min(2 ** attempt, 60);
+      await new Promise((r) => setTimeout(r, Math.ceil(waitSec * 1000)));
+      continue;
+    }
+
+    if (!aiResponse.ok) {
+      const msg = data.error?.message ?? JSON.stringify(data);
+      throw new Error(`Gemini API ${aiResponse.status}: ${msg}`);
+    }
+
+    const parts = data.candidates?.[0]?.content?.parts;
+    finalScript = parts?.map((p) => p.text).filter(Boolean).join('') ?? '';
+    if (finalScript) break;
+
     const blocked =
       data.promptFeedback?.blockReason ??
       (data.candidates?.[0] as { finishReason?: string } | undefined)?.finishReason;
     throw new Error(
       `Gemini returned no text${blocked ? ` (${blocked})` : ''}: ${JSON.stringify(data)}`
+    );
+  }
+
+  if (!finalScript) {
+    throw new Error(
+      `Gemini API ${lastStatus}: ${JSON.stringify(lastBody)}`
     );
   }
 
