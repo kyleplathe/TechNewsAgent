@@ -125,10 +125,19 @@ async function runNewsAgent() {
 
   console.log('Generating script with Gemini...');
 
+  const geminiTimeoutMs = Math.min(
+    180_000,
+    Math.max(
+      30_000,
+      parseInt(process.env.GEMINI_FETCH_TIMEOUT_MS ?? '120000', 10) || 120_000
+    )
+  );
+
   const aiResponse = await fetch(genUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body,
+    signal: AbortSignal.timeout(geminiTimeoutMs),
   });
 
   const data = (await aiResponse.json()) as GeminiResponse;

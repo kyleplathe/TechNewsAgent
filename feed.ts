@@ -35,6 +35,11 @@ export type ParsedFeed = {
   items: { title: string; link: string }[];
 };
 
+function feedFetchTimeoutMs(): number {
+  const n = parseInt(process.env.FEED_FETCH_TIMEOUT_MS ?? '25000', 10);
+  return Number.isFinite(n) && n >= 3000 ? Math.min(n, 120_000) : 25_000;
+}
+
 /** Fetch and parse RSS 2.0 or Atom using WHATWG URL + fetch (no legacy url.parse). */
 export async function parseFeedUrl(feedUrl: string): Promise<ParsedFeed> {
   const u = new URL(feedUrl);
@@ -42,7 +47,9 @@ export async function parseFeedUrl(feedUrl: string): Promise<ParsedFeed> {
     throw new Error(`Invalid feed URL: ${feedUrl}`);
   }
 
+  const ms = feedFetchTimeoutMs();
   const res = await fetch(u.href, {
+    signal: AbortSignal.timeout(ms),
     headers: {
       'User-Agent': 'TechNewsAgent/1.0 (+https://github.com/)',
       Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
