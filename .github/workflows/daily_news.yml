@@ -5,9 +5,8 @@ name: Daily Tech News Agent
   push:
     branches: [main]
   schedule:
-    # GitHub cron is UTC-only. 12:00 UTC ≈ 7:00 AM Central (CDT) / 6:00 AM CST — good for a morning routine.
-    # (HN updates all day; US tech headlines often pick up ~8–11 AM Eastern; scraping ~6–8 AM local still has plenty fresh.)
-    - cron: '0 12 * * *'
+    # UTC-only cron: 11:30 UTC = 6:30 AM Minneapolis during CDT (daylight). During CST (winter), same cron = 5:30 AM local — change to "30 12 * * *" for 6:30 AM in standard time.
+    - cron: '30 11 * * *'
   workflow_dispatch: # Allows you to run it manually for testing
 
 permissions:
