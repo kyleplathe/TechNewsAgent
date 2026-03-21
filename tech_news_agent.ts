@@ -6,11 +6,25 @@ async function runNewsAgent() {
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
-  // 1. GATHER GLOBAL TECH NEWS
+  // 1. GATHER GLOBAL TECH NEWS (title + HN submission age — front page is "today" even if title says "(2024)")
   await page.goto('https://news.ycombinator.com/');
-  const globalNews = await page.evaluate(() => 
-    Array.from(document.querySelectorAll('.titleline > a')).slice(0, 8).map(el => el.textContent)
-  );
+  const stories = await page.evaluate(() => {
+    const out: { title: string; age: string }[] = [];
+    for (const row of Array.from(document.querySelectorAll('tr.athing'))) {
+      const a = row.querySelector('.titleline > a');
+      const title = a?.textContent?.trim();
+      if (!title) continue;
+      const sub = row.nextElementSibling;
+      const age = sub?.querySelector('.age')?.textContent?.trim() ?? '';
+      out.push({ title, age });
+    }
+    return out.slice(0, 12);
+  });
+
+  const globalNews = stories.slice(0, 8).map((s) => {
+    const fresh = s.age ? ` — on HN front page ${s.age}` : '';
+    return `${s.title}${fresh}`;
+  });
 
   // 2. GATHER LOCAL CONTEXT (Simulated logic or targeted search)
   // Since we know it's March 2026, we'll bake in the logic for local events
@@ -30,8 +44,16 @@ async function runNewsAgent() {
 
   const prompt = `
     You are a high-energy tech news anchor for a daily vlog.
+
+    Accuracy (read carefully):
+    - Each "Global" line is a live Hacker News front-page story. The "on HN front page X ago" part is how recently readers upvoted it — that is your freshness signal.
+    - A year in a headline like "(2024)" or "(2022)" usually marks the original article or artifact, NOT the date of the tech news event. Do NOT say "just announced in 2024" unless the headline clearly refers to a 2024 launch. Prefer "making the rounds today" or "people are talking about…".
+    - Do not invent product names, prices, or dates that are not reasonably implied by the headlines.
+    - If a headline is clearly not tech, you may skip it briefly or tie it lightly — do not fabricate technical details.
+
     Context:
-    Global News: ${globalNews.join(', ')}
+    Global (Hacker News, with submission recency):
+    ${globalNews.map((line) => `• ${line}`).join('\n')}
     Local (Minneapolis): ${localContext}
 
     Write a 60-second TV script. 
