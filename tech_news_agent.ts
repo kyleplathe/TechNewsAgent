@@ -41,6 +41,13 @@ function parseScriptAndSources(
   return { script, indices: unique };
 }
 
+/** Gemini free tier often returns 429 with "Please retry in Xs" — parse that for backoff. */
+function parseGeminiRetrySeconds(message: string): number | null {
+  const m = message.match(/retry in ([\d.]+)\s*s/i);
+  if (!m) return null;
+  return Math.min(120, Math.max(1, parseFloat(m[1])));
+}
+
 async function runNewsAgent() {
   /** Fewer items per feed = tighter scripts (override with FEED_ITEM_LIMIT). */
   const perFeed = Math.min(
@@ -172,25 +179,56 @@ OUTPUT FORMAT (critical):
     )
   );
 
-  const aiResponse = await fetch(genUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body,
-    signal: AbortSignal.timeout(geminiTimeoutMs),
-  });
+  const maxGeminiAttempts = Math.min(
+    10,
+    Math.max(1, parseInt(process.env.GEMINI_MAX_RETRIES ?? '6', 10) || 6)
+  );
 
-  const data = (await aiResponse.json()) as GeminiResponse;
-  if (!aiResponse.ok) {
-    throw new Error(
-      `Gemini API ${aiResponse.status}: ${data.error?.message ?? JSON.stringify(data)}`
-    );
+  let rawOut = '';
+  let lastErr = '';
+
+  for (let attempt = 1; attempt <= maxGeminiAttempts; attempt++) {
+    const aiResponse = await fetch(genUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+      signal: AbortSignal.timeout(geminiTimeoutMs),
+    });
+
+    const data = (await aiResponse.json()) as GeminiResponse;
+
+    if (aiResponse.status === 429 && attempt < maxGeminiAttempts) {
+      const msg = data.error?.message ?? '';
+      lastErr = msg;
+      const waitSec =
+        parseGeminiRetrySeconds(msg) ?? Math.min(15 * attempt, 90);
+      console.warn(
+        `Gemini 429 (rate limit / quota window). Waiting ${Math.ceil(waitSec)}s — retry ${attempt + 1}/${maxGeminiAttempts}…`
+      );
+      await new Promise((r) =>
+        setTimeout(r, Math.ceil(waitSec * 1000))
+      );
+      continue;
+    }
+
+    if (!aiResponse.ok) {
+      throw new Error(
+        `Gemini API ${aiResponse.status}: ${data.error?.message ?? JSON.stringify(data)}`
+      );
+    }
+
+    const parts = data.candidates?.[0]?.content?.parts;
+    rawOut = parts?.map((p) => p.text).filter(Boolean).join('') ?? '';
+    if (!rawOut) {
+      throw new Error(`Gemini returned no text: ${JSON.stringify(data)}`);
+    }
+    break;
   }
 
-  const parts = data.candidates?.[0]?.content?.parts;
-  const rawOut =
-    parts?.map((p) => p.text).filter(Boolean).join('') ?? '';
   if (!rawOut) {
-    throw new Error(`Gemini returned no text: ${JSON.stringify(data)}`);
+    throw new Error(
+      `Gemini: exhausted ${maxGeminiAttempts} attempts (429). Last error: ${lastErr || 'unknown'}`
+    );
   }
 
   const { script: finalScript, indices } = parseScriptAndSources(
