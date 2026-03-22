@@ -11,7 +11,7 @@ function escapeHtml(s: string): string {
 }
 
 type Collected = {
-  section: 'TECH' | 'LOCAL';
+  section: 'TECH' | 'LOCAL' | 'HARDWARE';
   feedTitle: string;
   title: string;
   link: string;
@@ -87,6 +87,12 @@ async function runNewsAgent() {
     'https://feeds.arstechnica.com/arstechnica/index',
     'https://www.theverge.com/rss/index.xml',
   ];
+  /** Hardware — Apple, Mac, PC, chips (dedicated slot in the script). */
+  const hardwareFeeds = [
+    'https://www.apple.com/newsroom/rss-feed.rss',
+    'https://9to5mac.com/feed/',
+    'https://www.tomshardware.com/feeds.xml',
+  ];
   /** Local = Wolves only (no neighborhood paper — avoids non-tech city/gossip). */
   const localFeeds = ['https://www.canishoopus.com/rss/current.xml'];
 
@@ -94,7 +100,7 @@ async function runNewsAgent() {
 
   async function pull(
     urls: string[],
-    section: 'TECH' | 'LOCAL'
+    section: 'TECH' | 'LOCAL' | 'HARDWARE'
   ): Promise<void> {
     for (const url of urls) {
       try {
@@ -123,8 +129,9 @@ async function runNewsAgent() {
     }
   }
 
-  console.log('Fetching global and local feeds...');
+  console.log('Fetching global, hardware, and local feeds...');
   await pull(techFeeds, 'TECH');
+  await pull(hardwareFeeds, 'HARDWARE');
   await pull(localFeeds, 'LOCAL');
 
   if (!collected.length) {
@@ -139,14 +146,43 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
+  const hasHardware = collected.some((c) => c.section === 'HARDWARE');
+
+  const storyPickRule = hasHardware
+    ? `- Pick **3–5** total beats across **[TECH]** and **[HARDWARE]** — **exactly one** must be your **hardware highlight** from **[HARDWARE]** numbered items; the rest from **[TECH]**. Skip weaker stories — depth beats a laundry list.`
+    : `- Pick only the **3–5 strongest stories** to actually talk about. Skip the rest — depth beats a laundry list.`;
+
+  const segmentOrderBlock = hasHardware
+    ? `**SEGMENT ORDER (same in both columns — do not reorder):**
+1) **TECH** first — general tech from **[TECH]** only (software, AI, industry, etc.).
+2) **THEN EXACTLY ONE HARDWARE HIGHLIGHT** — pick **one** story from **[HARDWARE]** numbered items (phones, Macs, PCs, GPUs, wearables, accessories). Apple is a natural fit; other brands are welcome. **Older or “still relevant” headlines are fine** — not everything has to be from today.
+3) **THEN WOLVES** (Timberwolves — from **[LOCAL]** RSS only).
+4) **THEN LINDEN HILLS** neighborhood color (coffee, shops, Lake Harriet — spoken vibe, not city paper gossip).`
+    : `**SEGMENT ORDER (same in both columns — do not reorder):**
+1) **TECH** first (all tech beats).
+2) **THEN WOLVES** (Timberwolves — from **[LOCAL]** RSS only).
+3) **THEN LINDEN HILLS** neighborhood color (coffee, shops, Lake Harriet — spoken vibe, not city paper gossip).`;
+
+  const beatOrderPhrase = hasHardware
+    ? 'tech → hardware → Wolves → Linden Hills'
+    : 'tech → Wolves → Linden Hills';
+
+  const parityStories = hasHardware
+    ? 'Decide your **3–5 covered stories** once (including **exactly one** from **[HARDWARE]**). **Every** story you speak in ON_AIR must have a **matching** VIDEO_PROMPT beat'
+    : 'Decide your **3–5 covered stories** once. **Every** story you speak in ON_AIR must have a **matching** VIDEO_PROMPT beat';
+
+  const sourcesHardwareNote = hasHardware
+    ? `\n- The <<<SOURCES>>> line **must include at least one** index that points to a **[HARDWARE]** story (your single hardware highlight).`
+    : '';
+
   const prompt = `
-You are a punchy, high-energy tech news anchor filming from your repair shop in Linden Hills (Minneapolis).
+You are a punchy, high-energy tech news anchor filming from your repair shop in Linden Hills (Minneapolis). You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
 
 NUMBERED STORIES FOR TODAY (each has a URL for your reference only — you cannot browse the web):
 ${storyListText}
 
 QUALITY RULES:
-- Pick only the **3–5 strongest stories** to actually talk about. Skip the rest — depth beats a laundry list.
+${storyPickRule}
 - If a headline includes a year like "(2024)", that is usually the article’s original date, not “breaking today.” Say “making the rounds” or “people are digging into…” unless it’s clearly new.
 - Do not invent products, prices, or dates. Stay close to the headlines.
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
@@ -155,17 +191,19 @@ QUALITY RULES:
 
 You are writing for a **small professional studio**: one column is the **video / post prompt** (for Final Cut), the other is **on-air copy** (teleprompter / VO only).
 
-**SEGMENT ORDER (same in both columns — do not reorder):**
-1) **TECH** first (all tech beats).
-2) **THEN WOLVES** (Timberwolves — from **[LOCAL]** RSS only).
-3) **THEN LINDEN HILLS** neighborhood color (coffee, shops, Lake Harriet — spoken vibe, not city paper gossip).
+${segmentOrderBlock}
+
+**LOCKSTEP PARITY (VIDEO_PROMPT and ON_AIR must match 1:1):**
+- ${parityStories} (same company, product, headline topic, order). **No** B-roll, GFX, or domains in VIDEO_PROMPT for a story you do **not** say on air; **no** on-air beats that VIDEO_PROMPT does not cover.
+- Use the **same beat order** in both columns (${beatOrderPhrase}). If you use sub-labels in VIDEO_PROMPT (e.g. TECH 1 / TECH 2), ON_AIR must follow that same sequence.
+- VIDEO_PROMPT is the **edit map for this exact VO** — not a wish list. Do not add extra topics, products, or games in either column that the other column omits.
 
 ---
 
 **COLUMN A — VIDEO PROMPT (for editor / Final Cut / screenshots):**
 - Write like a **shot list + post brief**: numbered or short lines. Use clear labels: **CAM**, **B-ROLL**, **GFX**, **LOWER THIRD**, **FULL SCREEN**, **CUT**, **HOLD**, **SOT** if needed.
-- Match the same story order as VO: tech block, Wolves block, Linden Hills block.
-- Reference URLs or domains where useful for grab/screenshot (e.g. “B-roll: homepage opencode.ai”).
+- Mirror ON_AIR **line-for-beat**: each spoken paragraph or block in ON_AIR should have a corresponding VIDEO_PROMPT line or mini-block **in the same order**.
+- Reference URLs or domains where useful for grab/screenshot (e.g. “B-roll: homepage opencode.ai”) **only** for stories you also say on air.
 - This block is **not** read on camera — it’s for **you / the edit**.
 
 ---
@@ -181,13 +219,13 @@ You are writing for a **small professional studio**: one column is the **video /
 **OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
 
 <<<VIDEO_PROMPT>>>
-(Professional shot list / post brief here — CAM, B-ROLL, GFX, LOWER THIRD, etc. Same segment order: tech → Wolves → Linden Hills.)
+(Professional shot list / post brief — same stories and order as ON_AIR below. CAM, B-ROLL, GFX, LOWER THIRD, etc. Segment order: ${beatOrderPhrase}.)
 
 <<<ON_AIR>>>
-(ALL CAPS spoken script only — no bracketed shot notes here.)
+(ALL CAPS spoken script only — same stories and order as VIDEO_PROMPT above; no bracketed shot notes.)
 
 <<<SOURCES>>>
-(Exactly **one line** after this marker: comma-separated 1-based story numbers from the list above, e.g. 2,5,7 — no other text on that line.)
+(Exactly **one line** after this marker: comma-separated 1-based story numbers from the list above, e.g. 2,5,7 — no other text on that line.)${sourcesHardwareNote}
 `;
 
   const geminiKey = process.env.GEMINI_API_KEY;
