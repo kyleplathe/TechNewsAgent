@@ -51,8 +51,10 @@ function mobileMode(): boolean {
 }
 
 function viewport(): { width: number; height: number } {
-  const defaultW = mobileMode() ? 390 : 1280;
-  const defaultH = mobileMode() ? 844 : 720;
+  // Default to portrait 9:16 so grabs can be used as vertical GFX.
+  // Override any time with SCREENSHOT_WIDTH / SCREENSHOT_HEIGHT.
+  const defaultW = mobileMode() ? 720 : 720;
+  const defaultH = mobileMode() ? 1280 : 1280;
   const width = Math.min(
     2560,
     Math.max(320, parseInt(process.env.SCREENSHOT_WIDTH ?? String(defaultW), 10) || defaultW)
