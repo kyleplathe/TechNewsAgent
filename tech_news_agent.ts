@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { parseFeedUrl } from './feed';
 import { Resend } from 'resend';
+import { LOCAL_INTERSECTION_CENTER, pickLocalBusiness } from './local_businesses';
 
 function escapeHtml(s: string): string {
   return s
@@ -157,10 +158,18 @@ async function runNewsAgent() {
   const storyPickRule = `- Pick **3–5** total beats from **[TECH]** and **[HARDWARE]** numbered items **combined**. Lead with the strongest stories (software, AI, industry, security, platforms, etc.).
 - **Hardware / devices** (phones, Macs, PCs, GPUs, wearables, accessories): include **only when** a **[HARDWARE]** item is **clearly new or newly newsworthy** — e.g. announcement, ship/preorder date, major spec drop, timely review wave, or a **fresh angle** on a product. **Do not** force a device beat every episode. **Do not** recycle the **same product** day after day when headlines are just rehashes or slow drip — skip and spend the time on better **[TECH]** stories instead.`;
 
+  const pickedBiz = pickLocalBusiness();
+  const localBizName =
+    process.env.LOCAL_BIZ_NAME?.trim() || pickedBiz.name;
+  const localBizPitch =
+    process.env.LOCAL_BIZ_PITCH?.trim() ||
+    `${pickedBiz.description} (${pickedBiz.category}).`;
+  const localBizNote = process.env.LOCAL_BIZ_NOTE?.trim() || '';
+
   const segmentOrderBlock = `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
 2) **THEN WOLVES** (Timberwolves — from **[LOCAL]** RSS only).
-3) **THEN LINDEN HILLS** neighborhood color (coffee, shops, Lake Harriet — spoken vibe, not city paper gossip).`;
+3) **THEN LINDEN HILLS** neighborhood color: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) with a quick “go check them out” recommendation. Use this pitch line: **${localBizPitch}** Then add a small Linden Hills vibe note (Lake Harriet / morning shop energy). **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? `\n   - Extra note for the plug: ${localBizNote}` : ''}`;
 
   const beatOrderPhrase = 'tech → Wolves → Linden Hills';
 
@@ -179,6 +188,7 @@ ${storyPickRule}
 - Do not invent products, prices, or dates. Stay close to the headlines.
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
 - The only **local RSS** input is **Wolves / NBA** — use it for the basketball beat. **Linden Hills** — the shops, blocks, and neighborhood feel (near Lake Harriet, the usual haunts) — is **your on-camera color**, not something to pull from a city news feed.
+- For the Linden Hills close: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) and tell viewers to check them out. Use this pitch line: **${localBizPitch}** **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? ` Use this extra note: ${localBizNote}` : ''}
 - Keep it tight for **about 60 seconds** read aloud.
 
 You are writing for a **small professional studio**: one column is the **video / post prompt** (for Final Cut), the other is **on-air copy** (teleprompter / VO only).
