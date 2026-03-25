@@ -5,8 +5,8 @@ name: Daily Tech News Agent
   push:
     branches: [main]
   schedule:
-    # UTC-only cron: 11:30 UTC = 6:30 AM Minneapolis during CDT (daylight). During CST (winter), same cron = 5:30 AM local — change to "30 12 * * *" for 6:30 AM in standard time.
-    - cron: '30 11 * * *'
+    # UTC-only cron: 10:45 UTC = 5:45 AM Minneapolis during CDT (daylight). During CST (winter), use "45 11 * * *" for 5:45 AM local (10:45 UTC would be 4:45 AM then).
+    - cron: '45 10 * * *'
   workflow_dispatch: # Allows you to run it manually for testing
 
 permissions:
