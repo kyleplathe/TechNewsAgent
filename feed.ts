@@ -32,7 +32,7 @@ function atomLinkHref(link: unknown): string {
 
 export type ParsedFeed = {
   title: string;
-  items: { title: string; link: string }[];
+  items: { title: string; link: string; date: string }[];
 };
 
 function feedFetchTimeoutMs(): number {
@@ -68,7 +68,11 @@ export async function parseFeedUrl(feedUrl: string): Promise<ParsedFeed> {
     const title = asString(channel.title);
     const items = asArray(channel.item as object | object[]).map((raw) => {
       const it = raw as Record<string, unknown>;
-      return { title: asString(it.title), link: asString(it.link) };
+      const date =
+        asString(it.pubDate) ||
+        asString(it.published) ||
+        asString(it['dc:date']);
+      return { title: asString(it.title), link: asString(it.link), date };
     });
     return { title, items };
   }
@@ -78,7 +82,8 @@ export async function parseFeedUrl(feedUrl: string): Promise<ParsedFeed> {
     const title = asString(feed.title);
     const items = asArray(feed.entry as object | object[]).map((raw) => {
       const e = raw as Record<string, unknown>;
-      return { title: asString(e.title), link: atomLinkHref(e.link) };
+      const date = asString(e.updated) || asString(e.published);
+      return { title: asString(e.title), link: atomLinkHref(e.link), date };
     });
     return { title, items };
   }

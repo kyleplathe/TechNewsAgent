@@ -12,10 +12,11 @@ function escapeHtml(s: string): string {
 }
 
 type Collected = {
-  section: 'TECH' | 'LOCAL' | 'HARDWARE';
+  section: 'TECH' | 'LOCAL' | 'HARDWARE' | 'SKATE';
   feedTitle: string;
   title: string;
   link: string;
+  date: string;
 };
 
 const M_VIDEO = '<<<VIDEO_PROMPT>>>';
@@ -102,6 +103,18 @@ async function runNewsAgent() {
     'https://9to5mac.com/feed/',
     'https://www.tomshardware.com/feeds.xml',
   ];
+  /** Skateboarding — mostly culture + video premieres; keep it tight. */
+  const skateFeeds = [
+    // Thrasher RSS (official help page lists feeds; this one is widely referenced)
+    'https://www.thrashermagazine.com/?format=feed&type=rss',
+    // WordPress defaults (may change; parser will warn if broken)
+    'https://www.jenkemmag.com/feed/',
+    'https://quartersnacks.com/feed/',
+    // Substack feed
+    'https://villagepsychic.substack.com/feed',
+    // Best-effort (may be blocked/changed)
+    'https://theberrics.com/feed',
+  ];
   /** Local = Wolves only (no neighborhood paper — avoids non-tech city/gossip). */
   const localFeeds = ['https://www.canishoopus.com/rss/current.xml'];
 
@@ -109,7 +122,7 @@ async function runNewsAgent() {
 
   async function pull(
     urls: string[],
-    section: 'TECH' | 'LOCAL' | 'HARDWARE'
+    section: 'TECH' | 'LOCAL' | 'HARDWARE' | 'SKATE'
   ): Promise<void> {
     for (const url of urls) {
       try {
@@ -125,11 +138,22 @@ async function runNewsAgent() {
         }
         for (const item of slice) {
           if (!item.title) continue;
+          // Wolves beat: only include if published within last 24 hours.
+          if (section === 'LOCAL') {
+            const d = item.date ? new Date(item.date) : null;
+            if (d && Number.isFinite(d.getTime())) {
+              const ageMs = Date.now() - d.getTime();
+              if (ageMs > 24 * 60 * 60 * 1000) {
+                continue;
+              }
+            }
+          }
           collected.push({
             section,
             feedTitle: title,
             title: item.title,
             link: item.link?.trim() || '',
+            date: item.date?.trim() || '',
           });
         }
       } catch (e) {
@@ -141,6 +165,7 @@ async function runNewsAgent() {
   console.log('Fetching global, hardware, and local feeds...');
   await pull(techFeeds, 'TECH');
   await pull(hardwareFeeds, 'HARDWARE');
+  await pull(skateFeeds, 'SKATE');
   await pull(localFeeds, 'LOCAL');
 
   if (!collected.length) {
@@ -155,7 +180,7 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const storyPickRule = `- Pick **3–5** total beats from **[TECH]** and **[HARDWARE]** numbered items **combined**. Lead with the strongest stories (software, AI, industry, security, platforms, etc.).
+  const storyPickRule = `- Pick **3–6** total beats from **[TECH]**, **[HARDWARE]**, and **[SKATE]** numbered items **combined**. Lead with the strongest stories (software, AI, industry, security, platforms, etc.) and keep skate tight (one quick hitter if anything is truly good today).
 - **Hardware / devices** (phones, Macs, PCs, GPUs, wearables, accessories): include **only when** a **[HARDWARE]** item is **clearly new or newly newsworthy** — e.g. announcement, ship/preorder date, major spec drop, timely review wave, or a **fresh angle** on a product. **Do not** force a device beat every episode. **Do not** recycle the **same product** day after day when headlines are just rehashes or slow drip — skip and spend the time on better **[TECH]** stories instead.`;
 
   const pickedBiz = pickLocalBusiness();
@@ -166,12 +191,22 @@ async function runNewsAgent() {
     `${pickedBiz.description} (${pickedBiz.category}).`;
   const localBizNote = process.env.LOCAL_BIZ_NOTE?.trim() || '';
 
-  const segmentOrderBlock = `**SEGMENT ORDER (same in both columns — do not reorder):**
+  const hasWolves = collected.some((c) => c.section === 'LOCAL');
+
+  const segmentOrderBlock = hasWolves
+    ? `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
-2) **THEN WOLVES** (Timberwolves — from **[LOCAL]** RSS only).
+2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
+3) **THEN WOLVES** (Timberwolves — from **[LOCAL]** RSS only, and only if the item is from the last 24 hours).
+4) **THEN LINDEN HILLS** neighborhood color: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) with a quick “go check them out” recommendation. Use this pitch line: **${localBizPitch}** Then add a small Linden Hills vibe note (Lake Harriet / morning shop energy). **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? `\n   - Extra note for the plug: ${localBizNote}` : ''}`
+    : `**SEGMENT ORDER (same in both columns — do not reorder):**
+1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
+2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
 3) **THEN LINDEN HILLS** neighborhood color: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) with a quick “go check them out” recommendation. Use this pitch line: **${localBizPitch}** Then add a small Linden Hills vibe note (Lake Harriet / morning shop energy). **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? `\n   - Extra note for the plug: ${localBizNote}` : ''}`;
 
-  const beatOrderPhrase = 'tech → Wolves → Linden Hills';
+  const beatOrderPhrase = hasWolves
+    ? 'tech → skate → Wolves → Linden Hills'
+    : 'tech → skate → Linden Hills';
 
   const parityStories =
     'Decide your **3–5 covered stories** once. **Every** story you speak in ON_AIR must have a **matching** VIDEO_PROMPT beat';
@@ -187,7 +222,9 @@ ${storyPickRule}
 - If a headline includes a year like "(2024)", that is usually the article’s original date, not “breaking today.” Say “making the rounds” or “people are digging into…” unless it’s clearly new.
 - Do not invent products, prices, or dates. Stay close to the headlines.
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
-- The only **local RSS** input is **Wolves / NBA** — use it for the basketball beat. **Linden Hills** — the shops, blocks, and neighborhood feel (near Lake Harriet, the usual haunts) — is **your on-camera color**, not something to pull from a city news feed.
+- The only **local RSS** input is **Wolves / NBA** — use it for the basketball beat **only if** the item is from the **last 24 hours**; if the Wolves headline is older, skip Wolves entirely.
+- Skateboarding: use **[SKATE]** sources for one quick, legit skate beat (premiere, SOTY/contest/news). Skip if nothing’s good.
+- **Linden Hills** — the shops, blocks, and neighborhood feel (near Lake Harriet, the usual haunts) — is **your on-camera color**, not something to pull from a city news feed.
 - For the Linden Hills close: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) and tell viewers to check them out. Use this pitch line: **${localBizPitch}** **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? ` Use this extra note: ${localBizNote}` : ''}
 - Keep it tight for **about 60 seconds** read aloud.
 
