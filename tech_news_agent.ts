@@ -205,7 +205,7 @@ ${segmentOrderBlock}
 **COLUMN B — ON AIR (teleprompter / voiceover — spoken words only):**
 - **ALL CAPS.** Short lines. **Do not put [B-ROLL] or shot notes here** — those belong in VIDEO PROMPT only.
 - START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
-- **Enunciation:** After tricky names, one syllable guide in parens with stress in ALL CAPS: (oh-PEN-code), (MAM-buh). Spelled letters only for real acronyms (A I, G P U).
+- **Enunciation (INLINE, not a list):** Put the phonetic right **next to the word on first mention**, immediately after it in parentheses — not at the end of the beat/section. Keep it short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye), MAMBA (MAM-buh). Spelled letters only for real acronyms (A I, G P U).
 - END exactly: BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
 
 ---
@@ -219,7 +219,7 @@ ${segmentOrderBlock}
 (ALL CAPS spoken script only — same stories and order as VIDEO_PROMPT above; no bracketed shot notes.)
 
 <<<SOURCES>>>
-(Exactly **one line** after this marker: comma-separated 1-based story numbers from the list above, e.g. 2,5,7 — no other text on that line.)
+(Exactly **one line** after this marker: comma-separated 1-based story numbers from the list above, e.g. 2,5,7 — no other text on that line. **Order matters**: list the covered story numbers in the **same order you cover them on air** — first number = first beat, etc. Only include stories you actually covered.)
 `;
 
   const geminiKey = process.env.GEMINI_API_KEY;

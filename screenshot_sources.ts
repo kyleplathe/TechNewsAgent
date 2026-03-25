@@ -45,9 +45,22 @@ function navTimeoutMs(): number {
   );
 }
 
+function mobileMode(): boolean {
+  const v = process.env.SCREENSHOT_MOBILE?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 function viewport(): { width: number; height: number } {
-  const width = Math.min(2560, Math.max(640, parseInt(process.env.SCREENSHOT_WIDTH ?? '1280', 10) || 1280));
-  const height = Math.min(2160, Math.max(480, parseInt(process.env.SCREENSHOT_HEIGHT ?? '720', 10) || 720));
+  const defaultW = mobileMode() ? 390 : 1280;
+  const defaultH = mobileMode() ? 844 : 720;
+  const width = Math.min(
+    2560,
+    Math.max(320, parseInt(process.env.SCREENSHOT_WIDTH ?? String(defaultW), 10) || defaultW)
+  );
+  const height = Math.min(
+    2160,
+    Math.max(480, parseInt(process.env.SCREENSHOT_HEIGHT ?? String(defaultH), 10) || defaultH)
+  );
   return { width, height };
 }
 
@@ -106,11 +119,22 @@ export async function screenshotSources(
   const delay = settleMs();
   const fp = fullPage();
 
-  const context = await browser.newContext({
-    viewport: { width, height },
-    userAgent:
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-  });
+  const context = await browser.newContext(
+    mobileMode()
+      ? {
+          viewport: { width, height },
+          isMobile: true,
+          hasTouch: true,
+          deviceScaleFactor: 3,
+          userAgent:
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        }
+      : {
+          viewport: { width, height },
+          userAgent:
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        }
+  );
 
   try {
     for (const it of filtered) {
