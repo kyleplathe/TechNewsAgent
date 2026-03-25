@@ -74,6 +74,14 @@ function parseGeminiRetrySeconds(message: string): number | null {
   return Math.min(120, Math.max(1, parseFloat(m[1])));
 }
 
+/** Default on; set SCREENSHOT_SOURCES=0 to skip Playwright (faster local runs / no browser install). */
+function envScreenshotsEnabled(): boolean {
+  const v = process.env.SCREENSHOT_SOURCES?.trim().toLowerCase();
+  if (v === undefined || v === '') return true;
+  if (['0', 'false', 'no', 'off'].includes(v)) return false;
+  return true;
+}
+
 async function runNewsAgent() {
   /** Fewer items per feed = tighter scripts (override with FEED_ITEM_LIMIT). */
   const perFeed = Math.min(
@@ -87,7 +95,7 @@ async function runNewsAgent() {
     'https://feeds.arstechnica.com/arstechnica/index',
     'https://www.theverge.com/rss/index.xml',
   ];
-  /** Hardware — Apple, Mac, PC, chips (dedicated slot in the script). */
+  /** Hardware / devices — mixed into tech beats when news is fresh (not a forced daily slot). */
   const hardwareFeeds = [
     'https://www.apple.com/newsroom/rss-feed.rss',
     'https://9to5mac.com/feed/',
@@ -146,34 +154,18 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const hasHardware = collected.some((c) => c.section === 'HARDWARE');
+  const storyPickRule = `- Pick **3–5** total beats from **[TECH]** and **[HARDWARE]** numbered items **combined**. Lead with the strongest stories (software, AI, industry, security, platforms, etc.).
+- **Hardware / devices** (phones, Macs, PCs, GPUs, wearables, accessories): include **only when** a **[HARDWARE]** item is **clearly new or newly newsworthy** — e.g. announcement, ship/preorder date, major spec drop, timely review wave, or a **fresh angle** on a product. **Do not** force a device beat every episode. **Do not** recycle the **same product** day after day when headlines are just rehashes or slow drip — skip and spend the time on better **[TECH]** stories instead.`;
 
-  const storyPickRule = hasHardware
-    ? `- Pick **3–5** total beats across **[TECH]** and **[HARDWARE]** — **exactly one** must be your **hardware highlight** from **[HARDWARE]** numbered items; the rest from **[TECH]**. Skip weaker stories — depth beats a laundry list.`
-    : `- Pick only the **3–5 strongest stories** to actually talk about. Skip the rest — depth beats a laundry list.`;
-
-  const segmentOrderBlock = hasHardware
-    ? `**SEGMENT ORDER (same in both columns — do not reorder):**
-1) **TECH** first — general tech from **[TECH]** only (software, AI, industry, etc.).
-2) **THEN EXACTLY ONE HARDWARE HIGHLIGHT** — pick **one** story from **[HARDWARE]** numbered items (phones, Macs, PCs, GPUs, wearables, accessories). Apple is a natural fit; other brands are welcome. **Older or “still relevant” headlines are fine** — not everything has to be from today.
-3) **THEN WOLVES** (Timberwolves — from **[LOCAL]** RSS only).
-4) **THEN LINDEN HILLS** neighborhood color (coffee, shops, Lake Harriet — spoken vibe, not city paper gossip).`
-    : `**SEGMENT ORDER (same in both columns — do not reorder):**
-1) **TECH** first (all tech beats).
+  const segmentOrderBlock = `**SEGMENT ORDER (same in both columns — do not reorder):**
+1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
 2) **THEN WOLVES** (Timberwolves — from **[LOCAL]** RSS only).
 3) **THEN LINDEN HILLS** neighborhood color (coffee, shops, Lake Harriet — spoken vibe, not city paper gossip).`;
 
-  const beatOrderPhrase = hasHardware
-    ? 'tech → hardware → Wolves → Linden Hills'
-    : 'tech → Wolves → Linden Hills';
+  const beatOrderPhrase = 'tech → Wolves → Linden Hills';
 
-  const parityStories = hasHardware
-    ? 'Decide your **3–5 covered stories** once (including **exactly one** from **[HARDWARE]**). **Every** story you speak in ON_AIR must have a **matching** VIDEO_PROMPT beat'
-    : 'Decide your **3–5 covered stories** once. **Every** story you speak in ON_AIR must have a **matching** VIDEO_PROMPT beat';
-
-  const sourcesHardwareNote = hasHardware
-    ? `\n- The <<<SOURCES>>> line **must include at least one** index that points to a **[HARDWARE]** story (your single hardware highlight).`
-    : '';
+  const parityStories =
+    'Decide your **3–5 covered stories** once. **Every** story you speak in ON_AIR must have a **matching** VIDEO_PROMPT beat';
 
   const prompt = `
 You are a punchy, high-energy tech news anchor filming from your repair shop in Linden Hills (Minneapolis). You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
@@ -195,15 +187,17 @@ ${segmentOrderBlock}
 
 **LOCKSTEP PARITY (VIDEO_PROMPT and ON_AIR must match 1:1):**
 - ${parityStories} (same company, product, headline topic, order). **No** B-roll, GFX, or domains in VIDEO_PROMPT for a story you do **not** say on air; **no** on-air beats that VIDEO_PROMPT does not cover.
-- Use the **same beat order** in both columns (${beatOrderPhrase}). If you use sub-labels in VIDEO_PROMPT (e.g. TECH 1 / TECH 2), ON_AIR must follow that same sequence.
+- Use the **same beat order** in both columns (${beatOrderPhrase}). If you use \`##\` headings or sub-labels in VIDEO_PROMPT (e.g. TECH 1 / TECH 2), ON_AIR must follow that same sequence.
 - VIDEO_PROMPT is the **edit map for this exact VO** — not a wish list. Do not add extra topics, products, or games in either column that the other column omits.
 
 ---
 
-**COLUMN A — VIDEO PROMPT (for editor / Final Cut / screenshots):**
-- Write like a **shot list + post brief**: numbered or short lines. Use clear labels: **CAM**, **B-ROLL**, **GFX**, **LOWER THIRD**, **FULL SCREEN**, **CUT**, **HOLD**, **SOT** if needed.
-- Mirror ON_AIR **line-for-beat**: each spoken paragraph or block in ON_AIR should have a corresponding VIDEO_PROMPT line or mini-block **in the same order**.
-- Reference URLs or domains where useful for grab/screenshot (e.g. “B-roll: homepage opencode.ai”) **only** for stories you also say on air.
+**COLUMN A — VIDEO PROMPT (Markdown — editor / Final Cut template / screenshots):**
+- Output **valid Markdown** (not plain prose paragraphs). Structure it so you can paste into a doc or sidecar for a **~5-minute** cut: one \`##\` heading per story beat (e.g. \`## Tech — OpenAI\`, \`## Wolves\`), then under each heading use **bullet lists** for shots.
+- Start with a single \`# Morning bench — edit map\` (or similar) title line, then segments in order: **tech beats** (use \`###\` subheads if you split multiple tech stories), **Wolves**, **Linden Hills**.
+- Each shot line: lead with a **bold** label — **CAM**, **B-ROLL**, **GFX**, **LOWER THIRD**, **FULL SCREEN**, **CUT**, **HOLD**, **SOT** — then the note (e.g. \`- **B-ROLL**: homepage grab — opencode.ai\`).
+- Mirror ON_AIR **beat-for-beat**: each spoken block in ON_AIR must have a matching \`##\` / list section **in the same order**.
+- Reference URLs or domains where useful for grab/screenshot **only** for stories you also say on air.
 - This block is **not** read on camera — it’s for **you / the edit**.
 
 ---
@@ -219,13 +213,13 @@ ${segmentOrderBlock}
 **OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
 
 <<<VIDEO_PROMPT>>>
-(Professional shot list / post brief — same stories and order as ON_AIR below. CAM, B-ROLL, GFX, LOWER THIRD, etc. Segment order: ${beatOrderPhrase}.)
+(Markdown edit map: \`#\` / \`##\` / \`###\`, bullet shot lists with **CAM** / **B-ROLL** / **GFX** / etc. Same stories and order as ON_AIR. Segment order: ${beatOrderPhrase}.)
 
 <<<ON_AIR>>>
 (ALL CAPS spoken script only — same stories and order as VIDEO_PROMPT above; no bracketed shot notes.)
 
 <<<SOURCES>>>
-(Exactly **one line** after this marker: comma-separated 1-based story numbers from the list above, e.g. 2,5,7 — no other text on that line.)${sourcesHardwareNote}
+(Exactly **one line** after this marker: comma-separated 1-based story numbers from the list above, e.g. 2,5,7 — no other text on that line.)
 `;
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -347,6 +341,89 @@ ${segmentOrderBlock}
           .join('')
       : `<p style="color:#888;font-size:13px">No parsed source list — model did not return <<<SOURCES>>> lines, or no URLs in those items.</p>`;
 
+  const screenshotItems = indices
+    .map((storyIdx) => {
+      const c = collected[storyIdx - 1];
+      if (!c) return null;
+      const link = c.link?.trim();
+      if (!link) return null;
+      return {
+        storyIndex: storyIdx,
+        section: c.section,
+        title: c.title,
+        link,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+
+  let attachments:
+    | Array<{ filename: string; content: Buffer; contentType?: string }>
+    | undefined;
+  let screenshotBannerText = '';
+  let screenshotBannerHtml = '';
+
+  if (envScreenshotsEnabled() && screenshotItems.length) {
+    const max = Math.min(
+      12,
+      Math.max(1, parseInt(process.env.SCREENSHOT_MAX ?? '12', 10) || 12)
+    );
+    const slice = screenshotItems.slice(0, max);
+    console.log(
+      `Capturing ${slice.length} source screenshot(s) (Playwright / Chromium)…`
+    );
+    const { screenshotSources } = await import('./screenshot_sources');
+    const { ok: shots, failures: shotFails } = await screenshotSources(slice);
+
+    const maxBytes = Math.min(
+      38 * 1024 * 1024,
+      Math.max(
+        5 * 1024 * 1024,
+        parseInt(process.env.SCREENSHOT_MAX_TOTAL_BYTES ?? '34000000', 10) ||
+          34_000_000
+      )
+    );
+    let total = 0;
+    const kept: typeof shots = [];
+    for (const s of shots) {
+      if (total + s.content.length > maxBytes) {
+        console.warn(
+          `Screenshot size budget reached — omitting further attachments (${s.filename}).`
+        );
+        break;
+      }
+      total += s.content.length;
+      kept.push(s);
+    }
+
+    if (kept.length) {
+      attachments = kept.map((s) => ({
+        filename: s.filename,
+        content: s.content,
+        contentType: 'image/jpeg',
+      }));
+      const names = kept.map((s) => s.filename).join(', ');
+      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nViewport default ${process.env.SCREENSHOT_WIDTH ?? '1280'}×${process.env.SCREENSHOT_HEIGHT ?? '720'}; set SCREENSHOT_FULL_PAGE=1 for full scroll. Failed or skipped URLs are listed below if any.\n`;
+      screenshotBannerHtml =
+        `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
+        `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
+          `${kept.length} JPEG(s) attached (${names}). Default viewport grab; paywalls / bot blocking may produce partial or error pages.`
+        )}</p>`;
+    }
+    if (shotFails.length) {
+      const failLines = shotFails
+        .map((f) => `#${f.storyIndex} ${f.link} — ${f.error}`)
+        .join('\n');
+      console.warn('Screenshot failures:\n' + failLines);
+      screenshotBannerText +=
+        '\nScreenshot failures / skips:\n' + failLines + '\n';
+      screenshotBannerHtml +=
+        `<p style="font-size:12px;font-weight:700;color:#666;margin:0 0 0.35em">Screenshot failures</p>` +
+        `<pre style="white-space:pre-wrap;font-size:11px;line-height:1.4;margin:0 0 1em;padding:10px;background:#fff8f5;border-radius:6px;border:1px solid #eee">${escapeHtml(failLines)}</pre>`;
+    }
+  } else if (!envScreenshotsEnabled()) {
+    console.log('SCREENSHOT_SOURCES disabled — skipping Playwright.');
+  }
+
   const resendKey = process.env.RESEND_API_KEY;
   const toRaw = process.env.RESEND_TO?.trim();
   const from =
@@ -367,7 +444,7 @@ ${segmentOrderBlock}
       ? 'SOURCE LINKS (for this segment — screenshots / posts)'
       : 'SOURCE LINKS (none parsed — see log)';
 
-  const videoHeader = 'VIDEO PROMPT (edit / Final Cut / post)';
+  const videoHeader = 'VIDEO PROMPT — Markdown (edit / Final Cut / post)';
   const onAirHeader = 'ON AIR (teleprompter / VO)';
 
   const emailText = [
@@ -380,7 +457,10 @@ ${segmentOrderBlock}
     linksHeader,
     '',
     linksText || '(none)',
-  ].join('\n');
+    screenshotBannerText.trimEnd(),
+  ]
+    .filter((block) => block.length > 0)
+    .join('\n');
 
   const emailHtml =
     `<div style="font-family:system-ui,sans-serif;max-width:760px;color:#111">` +
@@ -390,14 +470,16 @@ ${segmentOrderBlock}
     `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd">${escapeHtml(finalScript.trim())}</pre>` +
     `<p style="font-size:12px;font-weight:700;color:#444;margin:0 0 0.5em">${escapeHtml(linksHeader)}</p>` +
     `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.45">${linksHtml}</div>` +
+    screenshotBannerHtml +
     `</div>`;
 
   const { data: sendData, error: sendErr } = await resend.emails.send({
     from,
     to,
-    subject: `📺 Your News Script for ${new Date().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`,
+    subject: `📺 Your News Script for ${new Date().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}${attachments?.length ? ' 📎' : ''}`,
     text: emailText,
     html: emailHtml,
+    ...(attachments?.length ? { attachments } : {}),
   });
 
   if (sendErr) {
@@ -405,6 +487,9 @@ ${segmentOrderBlock}
   }
 
   console.log('Mission accomplished. Resend id:', sendData?.id);
+  if (attachments?.length) {
+    console.log(`Attached ${attachments.length} source screenshot(s).`);
+  }
   if (videoPrompt.trim()) {
     console.log('\n--- VIDEO PROMPT ---\n' + videoPrompt.trim());
   }
