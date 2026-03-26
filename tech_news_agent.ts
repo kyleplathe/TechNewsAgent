@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { parseFeedUrl } from './feed';
 import { Resend } from 'resend';
 import { LOCAL_INTERSECTION_CENTER, pickLocalBusiness } from './local_businesses';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 function escapeHtml(s: string): string {
   return s
@@ -17,6 +18,14 @@ type Collected = {
   title: string;
   link: string;
   date: string;
+};
+
+type AirLogEntry = {
+  fingerprint: string;
+  title: string;
+  section: Collected['section'];
+  productKey: string;
+  airedAt: string;
 };
 
 const M_VIDEO = '<<<VIDEO_PROMPT>>>';
@@ -76,6 +85,129 @@ function parseGeminiRetrySeconds(message: string): number | null {
   return Math.min(120, Math.max(1, parseFloat(m[1])));
 }
 
+function normalizeText(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function titleFingerprint(title: string): string {
+  const stop = new Set([
+    'the', 'a', 'an', 'and', 'or', 'for', 'to', 'of', 'in', 'on', 'at', 'with',
+    'is', 'are', 'from', 'by', 'new', 'latest', 'today', 'update', 'news',
+  ]);
+  const tokens = normalizeText(title)
+    .split(' ')
+    .filter((t) => t.length >= 3 && !stop.has(t))
+    .slice(0, 8);
+  return tokens.join(' ');
+}
+
+function productKey(title: string): string {
+  const n = normalizeText(title);
+  const keys = [
+    'airpods max',
+    'iphone',
+    'macbook',
+    'ipad',
+    'vision pro',
+    'pixel',
+    'galaxy',
+    'playstation',
+    'xbox',
+  ];
+  const hit = keys.find((k) => n.includes(k));
+  return hit ?? titleFingerprint(title).split(' ').slice(0, 2).join(' ');
+}
+
+function hasReturnTrigger(title: string): boolean {
+  const n = normalizeText(title);
+  return [
+    'launch', 'ships', 'shipping', 'announces', 'announced', 'release', 'released',
+    'available', 'preorder', 'price cut', 'review', 'hands on', 'benchmark',
+    'acquire', 'acquired', 'lawsuit', 'settlement', 'earnings',
+  ].some((w) => n.includes(w));
+}
+
+function parseDateSafe(v: string): Date | null {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function isFreshForSection(item: Collected): boolean {
+  const d = parseDateSafe(item.date);
+  if (!d && item.section === 'LOCAL') {
+    // For Wolves, require a parseable date so stale undated items do not slip through.
+    return false;
+  }
+  if (!d) return true;
+  const ageMs = Date.now() - d.getTime();
+  const maxAgeMs =
+    item.section === 'LOCAL'
+      ? 24 * 60 * 60 * 1000
+      : item.section === 'SKATE'
+        ? 48 * 60 * 60 * 1000
+        : item.section === 'TECH'
+          ? 48 * 60 * 60 * 1000
+          : 72 * 60 * 60 * 1000;
+  return ageMs <= maxAgeMs;
+}
+
+async function readAirLog(path: string): Promise<AirLogEntry[]> {
+  try {
+    const raw = await readFile(path, 'utf8');
+    const arr = JSON.parse(raw) as AirLogEntry[];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeAirLog(path: string, entries: AirLogEntry[]): Promise<void> {
+  await mkdir('.agent-memory', { recursive: true });
+  await writeFile(path, JSON.stringify(entries, null, 2), 'utf8');
+}
+
+function enforceLindenHillsPlug(
+  onAir: string,
+  localBizName: string,
+  localBizPitch: string
+): string {
+  const endLine = "BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.";
+  const hasBiz = normalizeText(onAir).includes(normalizeText(localBizName));
+  if (hasBiz) return onAir.trim();
+
+  const plugLine = `LINDEN HILLS SHOUT-OUT: CHECK OUT ${localBizName.toUpperCase()} NEAR 43RD AND UPTON. ${localBizPitch.toUpperCase()} GO CHECK THEM OUT.`;
+  const trimmed = onAir.trim();
+  if (!trimmed) return `${plugLine}\n${endLine}`;
+  if (trimmed.endsWith(endLine)) {
+    const body = trimmed.slice(0, -endLine.length).trimEnd();
+    return `${body}\n${plugLine}\n${endLine}`.trim();
+  }
+  return `${trimmed}\n${plugLine}\n${endLine}`.trim();
+}
+
+function reorderIndicesByScriptMention(
+  indices: number[],
+  collected: Collected[],
+  onAir: string,
+  videoPrompt: string
+): number[] {
+  const combined = normalizeText(`${onAir}\n${videoPrompt}`);
+  const positions = indices.map((idx) => {
+    const c = collected[idx - 1];
+    if (!c) return { idx, pos: Number.MAX_SAFE_INTEGER };
+    const key = titleFingerprint(c.title).split(' ').slice(0, 4).join(' ');
+    const pos = key ? combined.indexOf(key) : -1;
+    return { idx, pos: pos >= 0 ? pos : Number.MAX_SAFE_INTEGER };
+  });
+  return positions.sort((a, b) => a.pos - b.pos).map((p) => p.idx);
+}
+
 /** Default on; set SCREENSHOT_SOURCES=0 to skip Playwright (faster local runs / no browser install). */
 function envScreenshotsEnabled(): boolean {
   const v = process.env.SCREENSHOT_SOURCES?.trim().toLowerCase();
@@ -118,7 +250,7 @@ async function runNewsAgent() {
   /** Local = Wolves only (no neighborhood paper — avoids non-tech city/gossip). */
   const localFeeds = ['https://www.canishoopus.com/rss/current.xml'];
 
-  const collected: Collected[] = [];
+  let collected: Collected[] = [];
 
   async function pull(
     urls: string[],
@@ -138,16 +270,6 @@ async function runNewsAgent() {
         }
         for (const item of slice) {
           if (!item.title) continue;
-          // Wolves beat: only include if published within last 24 hours.
-          if (section === 'LOCAL') {
-            const d = item.date ? new Date(item.date) : null;
-            if (d && Number.isFinite(d.getTime())) {
-              const ageMs = Date.now() - d.getTime();
-              if (ageMs > 24 * 60 * 60 * 1000) {
-                continue;
-              }
-            }
-          }
           collected.push({
             section,
             feedTitle: title,
@@ -171,6 +293,47 @@ async function runNewsAgent() {
   if (!collected.length) {
     throw new Error('No stories parsed from any feed — check URLs or network.');
   }
+
+  // Freshness gate + same-run de-dupe + cross-day anti-repeat memory.
+  collected = collected.filter(isFreshForSection);
+  const sameRunSeen = new Set<string>();
+  collected = collected.filter((c) => {
+    const fp = titleFingerprint(c.title);
+    if (!fp || sameRunSeen.has(fp)) return false;
+    sameRunSeen.add(fp);
+    return true;
+  });
+
+  if (!collected.length) {
+    throw new Error(
+      'All candidate stories were filtered out by freshness/repeat rules. Try lowering STORY_REPEAT_COOLDOWN_DAYS.'
+    );
+  }
+
+  const cooldownDays = Math.min(
+    21,
+    Math.max(3, parseInt(process.env.STORY_REPEAT_COOLDOWN_DAYS ?? '7', 10) || 7)
+  );
+  const cooldownMs = cooldownDays * 24 * 60 * 60 * 1000;
+  const airLogPath = '.agent-memory/airlog.json';
+  const airLog = await readAirLog(airLogPath);
+  const now = Date.now();
+  const recentLog = airLog.filter((e) => {
+    const d = parseDateSafe(e.airedAt);
+    return d ? now - d.getTime() <= 30 * 24 * 60 * 60 * 1000 : false;
+  });
+
+  collected = collected.filter((c) => {
+    const fp = titleFingerprint(c.title);
+    const pk = productKey(c.title);
+    const repeats = recentLog.filter((e) => e.fingerprint === fp || (pk && e.productKey === pk));
+    const hasCooldownHit = repeats.some((e) => {
+      const d = parseDateSafe(e.airedAt);
+      return d ? now - d.getTime() < cooldownMs : false;
+    });
+    if (!hasCooldownHit) return true;
+    return hasReturnTrigger(c.title);
+  });
 
   const storyListText = collected
     .map((c, i) => {
@@ -354,7 +517,15 @@ ${segmentOrderBlock}
     collected.length
   );
 
-  const used = indices
+  const fixedOnAir = enforceLindenHillsPlug(finalScript, localBizName, localBizPitch);
+  const orderedIndices = reorderIndicesByScriptMention(
+    indices,
+    collected,
+    fixedOnAir,
+    videoPrompt
+  );
+
+  const used = orderedIndices
     .map((i) => collected[i - 1])
     .filter(Boolean)
     .filter((c) => c.link);
@@ -364,12 +535,12 @@ ${segmentOrderBlock}
       'No <<<VIDEO_PROMPT>>> block parsed — check model output for studio format.'
     );
   }
-  if (!indices.length) {
+  if (!orderedIndices.length) {
     console.warn(
       'No <<<SOURCES>>> line parsed — email will omit screenshot links (check model output).'
     );
   } else {
-    console.log('Sources used for segment (screenshots):', indices.join(', '));
+    console.log('Sources used for segment (screenshots):', orderedIndices.join(', '));
   }
 
   /** Plain text: [SECTION] Title then URL on next line (matches FCP / screenshot workflow). */
@@ -388,7 +559,7 @@ ${segmentOrderBlock}
           .join('')
       : `<p style="color:#888;font-size:13px">No parsed source list — model did not return <<<SOURCES>>> lines, or no URLs in those items.</p>`;
 
-  const screenshotItems = indices
+  const screenshotItems = orderedIndices
     .map((storyIdx) => {
       const c = collected[storyIdx - 1];
       if (!c) return null;
@@ -499,7 +670,7 @@ ${segmentOrderBlock}
     videoPrompt.trim() || '(none — check model output)',
     '',
     onAirHeader,
-    finalScript.trim(),
+    fixedOnAir.trim(),
     '',
     linksHeader,
     '',
@@ -514,7 +685,7 @@ ${segmentOrderBlock}
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(videoHeader)}</p>` +
     `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.45;margin:0 0 1.5em;padding:12px;background:#f6f7f8;border-radius:8px;border:1px solid #e8e8e8">${escapeHtml(videoPrompt.trim() || '(none)')}</pre>` +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(onAirHeader)}</p>` +
-    `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd">${escapeHtml(finalScript.trim())}</pre>` +
+    `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd">${escapeHtml(fixedOnAir.trim())}</pre>` +
     `<p style="font-size:12px;font-weight:700;color:#444;margin:0 0 0.5em">${escapeHtml(linksHeader)}</p>` +
     `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.45">${linksHtml}</div>` +
     screenshotBannerHtml +
@@ -531,6 +702,21 @@ ${segmentOrderBlock}
 
   if (sendErr) {
     throw new Error(`Resend: ${sendErr.message} (${sendErr.name})`);
+  }
+
+  if (orderedIndices.length) {
+    const newEntries: AirLogEntry[] = orderedIndices
+      .map((idx) => collected[idx - 1])
+      .filter(Boolean)
+      .map((c) => ({
+        fingerprint: titleFingerprint(c.title),
+        title: c.title,
+        section: c.section,
+        productKey: productKey(c.title),
+        airedAt: new Date().toISOString(),
+      }));
+    const merged = [...recentLog, ...newEntries].slice(-400);
+    await writeAirLog(airLogPath, merged);
   }
 
   console.log('Mission accomplished. Resend id:', sendData?.id);
