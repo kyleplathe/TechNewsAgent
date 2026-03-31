@@ -12,8 +12,13 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** ~1.5× tracking vs tight body copy: scales with font-size for FCP / lower-third match. */
+const TICKER_LETTER_SPACING_EM = 0.15;
+
+type TickerPayload = { plain: string; htmlSegment: string };
+
 /** BTC spot (CoinGecko) + block height (blockchain.info) for on-air lower third / email ticker. */
-async function getTickerData(): Promise<string> {
+async function getTickerData(): Promise<TickerPayload> {
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'short',
@@ -51,7 +56,23 @@ async function getTickerData(): Promise<string> {
   } catch {
     /* keep fallbacks */
   }
-  return `BTC: ${btcPrice}  |  BLOCK: ${blockHeight}  |  ${today}  |  LIVE FROM LINDEN HILLS`;
+  const plain = `BTC: ${btcPrice}  |  BLOCK: ${blockHeight}  |  ${today}  |  LIVE FROM LINDEN HILLS`;
+  const sep = `<span style="font-weight:400">  |  </span>`;
+  const lab = (s: string) =>
+    `<span style="font-weight:700">${escapeHtml(s)}</span>`;
+  const val = (s: string) =>
+    `<span style="font-weight:400">${escapeHtml(s)}</span>`;
+  const htmlSegment =
+    lab('BTC:') +
+    val(` ${btcPrice}`) +
+    sep +
+    lab('BLOCK:') +
+    val(` ${blockHeight}`) +
+    sep +
+    val(today) +
+    sep +
+    lab('LIVE FROM LINDEN HILLS');
+  return { plain, htmlSegment };
 }
 
 type Collected = {
@@ -707,11 +728,15 @@ ${segmentOrderBlock}
   const videoHeader = 'VIDEO PROMPT — Markdown (edit / Final Cut / post)';
   const onAirHeader = 'ON AIR (teleprompter / VO)';
 
-  const tickerLine = await getTickerData();
-  const tickerDupHtml = `${escapeHtml(tickerLine)}     ·     ${escapeHtml(tickerLine)}`;
+  const ticker = await getTickerData();
+  const tickerLine = ticker.plain;
+  const tickerDupHtml =
+    `${ticker.htmlSegment}<span style="font-weight:400;opacity:0.45">     ·     </span>${ticker.htmlSegment}`;
+  const tickerMarqueeStyle =
+    `display:block;padding:14px 16px;font-family:'SF Pro Display',-apple-system,BlinkMacSystemFont,sans-serif;font-size:15px;color:#ffffff;letter-spacing:${TICKER_LETTER_SPACING_EM}em;line-height:1.35`;
   const tickerHtml =
-    `<div style="background:linear-gradient(90deg,#0f172a,#1e293b);color:#e2e8f0;margin:0 0 1.25em;border-radius:8px;border:1px solid #334155;overflow:hidden">` +
-    `<marquee behavior="scroll" direction="left" scrollamount="4" style="display:block;padding:12px 0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;font-weight:600;letter-spacing:0.02em">${tickerDupHtml}</marquee>` +
+    `<div style="background:linear-gradient(90deg,#0f172a,#1e293b);margin:0 0 1.25em;border-radius:8px;border:1px solid #334155;overflow:hidden">` +
+    `<marquee behavior="scroll" direction="left" scrollamount="4" style="${tickerMarqueeStyle}">${tickerDupHtml}</marquee>` +
     `</div>`;
 
   const emailText = [
