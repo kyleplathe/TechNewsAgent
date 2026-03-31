@@ -12,6 +12,48 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** BTC spot (CoinGecko) + block height (blockchain.info) for on-air lower third / email ticker. */
+async function getTickerData(): Promise<string> {
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'America/Chicago',
+  });
+  let btcPrice = '—';
+  let blockHeight = '—';
+  try {
+    const [priceRes, blockRes] = await Promise.all([
+      fetch(
+        'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd'
+      ),
+      fetch('https://blockchain.info/q/getblockcount'),
+    ]);
+    if (priceRes.ok) {
+      const priceData = (await priceRes.json()) as {
+        bitcoin?: { usd?: number };
+      };
+      const usd = priceData.bitcoin?.usd;
+      if (typeof usd === 'number') {
+        btcPrice = new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: 'USD',
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2,
+        }).format(usd);
+      }
+    }
+    if (blockRes.ok) {
+      const text = (await blockRes.text()).trim();
+      if (/^\d+$/.test(text)) blockHeight = text;
+    }
+  } catch {
+    /* keep fallbacks */
+  }
+  return `BTC: ${btcPrice}  |  BLOCK: ${blockHeight}  |  ${today}  |  LIVE FROM LINDEN HILLS`;
+}
+
 type Collected = {
   section: 'TECH' | 'LOCAL' | 'HARDWARE' | 'SKATE';
   feedTitle: string;
@@ -665,7 +707,16 @@ ${segmentOrderBlock}
   const videoHeader = 'VIDEO PROMPT — Markdown (edit / Final Cut / post)';
   const onAirHeader = 'ON AIR (teleprompter / VO)';
 
+  const tickerLine = await getTickerData();
+  const tickerDupHtml = `${escapeHtml(tickerLine)}     ·     ${escapeHtml(tickerLine)}`;
+  const tickerHtml =
+    `<div style="background:linear-gradient(90deg,#0f172a,#1e293b);color:#e2e8f0;margin:0 0 1.25em;border-radius:8px;border:1px solid #334155;overflow:hidden">` +
+    `<marquee behavior="scroll" direction="left" scrollamount="4" style="display:block;padding:12px 0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;font-weight:600;letter-spacing:0.02em">${tickerDupHtml}</marquee>` +
+    `</div>`;
+
   const emailText = [
+    tickerLine,
+    '',
     videoHeader,
     videoPrompt.trim() || '(none — check model output)',
     '',
@@ -682,6 +733,7 @@ ${segmentOrderBlock}
 
   const emailHtml =
     `<div style="font-family:system-ui,sans-serif;max-width:760px;color:#111">` +
+    tickerHtml +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(videoHeader)}</p>` +
     `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.45;margin:0 0 1.5em;padding:12px;background:#f6f7f8;border-radius:8px;border:1px solid #e8e8e8">${escapeHtml(videoPrompt.trim() || '(none)')}</pre>` +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(onAirHeader)}</p>` +
