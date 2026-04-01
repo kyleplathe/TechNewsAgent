@@ -57,6 +57,28 @@ async function getTickerData(): Promise<string> {
   return `BTC: ${btcPrice}  |  BLOCK: ${blockHeight}  |  ${today}  |  LIVE FROM LINDEN HILLS`;
 }
 
+/** Caption / description block for Reels, Shorts, TikTok, X, Threads, etc. */
+function buildSocialMediaCaption(): string {
+  const when = new Date().toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'America/Chicago',
+  });
+  return [
+    `Tech News Daily with Kyle · ${when}`,
+    '',
+    'Your daily tech briefing — the stories that matter, without the doom-scroll. Quick hits, clear context, and what it means for you.',
+    '',
+    'New episode every day. Follow so you catch the next rundown the moment it drops — easiest way to stay ahead of what is moving in tech.',
+    '',
+    'Follow for the freshest daily tech news.',
+    '',
+    '#TechNews #TechNewsDaily #Technology #TechTok #DailyTechNews',
+  ].join('\n');
+}
+
 type Collected = {
   section: 'TECH' | 'LOCAL' | 'HARDWARE' | 'SKATE';
   feedTitle: string;
@@ -709,11 +731,19 @@ ${segmentOrderBlock}
 
   const videoHeader = 'VIDEO PROMPT — Markdown (edit / Final Cut / post)';
   const onAirHeader = 'ON AIR (teleprompter / VO)';
+  const socialHeader =
+    'SOCIAL — Tech News Daily with Kyle (video caption / description)';
 
   const tickerLine = await getTickerData();
+  const socialCaption = buildSocialMediaCaption();
   const tickerHtml =
     `<div style="margin:0 0 1.25em;padding:14px 16px;background:#f4f4f5;border-radius:8px;border:1px solid #e4e4e7">` +
     `<pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;line-height:1.45;color:#18181b;user-select:all;-webkit-user-select:all">${escapeHtml(tickerLine)}</pre>` +
+    `</div>`;
+
+  const socialCaptionHtml =
+    `<div style="margin:0 0 1.25em;padding:14px 16px;background:#f4f4f5;border-radius:8px;border:1px solid #e4e4e7">` +
+    `<pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;line-height:1.45;color:#18181b;user-select:all;-webkit-user-select:all">${escapeHtml(socialCaption)}</pre>` +
     `</div>`;
 
   const emailText = [
@@ -724,6 +754,9 @@ ${segmentOrderBlock}
     '',
     onAirHeader,
     fixedOnAir.trim(),
+    '',
+    socialHeader,
+    socialCaption,
     '',
     linksHeader,
     '',
@@ -740,6 +773,8 @@ ${segmentOrderBlock}
     `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.45;margin:0 0 1.5em;padding:12px;background:#f6f7f8;border-radius:8px;border:1px solid #e8e8e8">${escapeHtml(videoPrompt.trim() || '(none)')}</pre>` +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(onAirHeader)}</p>` +
     `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd">${escapeHtml(fixedOnAir.trim())}</pre>` +
+    `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(socialHeader)}</p>` +
+    socialCaptionHtml +
     `<p style="font-size:12px;font-weight:700;color:#444;margin:0 0 0.5em">${escapeHtml(linksHeader)}</p>` +
     `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.45">${linksHtml}</div>` +
     screenshotBannerHtml +
