@@ -80,37 +80,47 @@ function screenshotMode(): 'viewport' | 'content' | 'fullpage' {
 }
 
 function maxContentHeightPx(): number {
+  /** Tall enough for headline + hero in one still; mask/scale in FCP for PiP placement. */
   return Math.min(
     8000,
-    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '1500', 10) || 1500)
+    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '2400', 10) || 2400)
   );
 }
 
-/** Cap crop width (centered) so stills aren’t huge in 9:16 PiP; GitHub gets a wider cap (less “zoomed column”). */
-function maxContentWidthForHost(hostname: string): number {
+/**
+ * Optional center-crop max width. **Default: no cap** — captures full article column width so
+ * long headlines aren’t clipped; reframe with a mask in the FCP compound clip.
+ * Set `SCREENSHOT_MAX_CONTENT_WIDTH=720` (or similar) if you want narrower JPEGs again.
+ */
+function parseOptionalMaxContentWidth(envKey: string): number | null {
+  const raw = process.env[envKey]?.trim();
+  if (raw === undefined || raw === '') return null;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(4000, Math.max(280, n));
+}
+
+function maxContentWidthForHost(hostname: string): number | null {
   const h = hostname.toLowerCase();
-  if (
+  const isGh =
     h === 'github.com' ||
     h === 'gist.github.com' ||
     h.endsWith('.github.com') ||
-    h === 'github.blog'
-  ) {
-    return Math.min(
-      2000,
-      Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_WIDTH_GITHUB ?? '900', 10) || 900)
+    h === 'github.blog';
+  if (isGh) {
+    return (
+      parseOptionalMaxContentWidth('SCREENSHOT_MAX_CONTENT_WIDTH_GITHUB') ??
+      parseOptionalMaxContentWidth('SCREENSHOT_MAX_CONTENT_WIDTH')
     );
   }
-  return Math.min(
-    2000,
-    Math.max(280, parseInt(process.env.SCREENSHOT_MAX_CONTENT_WIDTH ?? '680', 10) || 680)
-  );
+  return parseOptionalMaxContentWidth('SCREENSHOT_MAX_CONTENT_WIDTH');
 }
 
 function applyMaxWidthToClip(
   clip: { x: number; y: number; width: number; height: number },
-  maxW: number
+  maxW: number | null
 ): { x: number; y: number; width: number; height: number } {
-  if (clip.width <= maxW) return clip;
+  if (maxW == null || clip.width <= maxW) return clip;
   const shave = clip.width - maxW;
   return {
     x: clip.x + shave / 2,

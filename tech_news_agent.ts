@@ -558,7 +558,7 @@ ${segmentOrderBlock}
 Kyle’s workflow: **one vertical single take** (talking head), **template** with logo + ticker, **one numbered screenshot still per story** (files land in the linked folder in script order — blade the compound clip per beat). No browser demo, no “full preview” segment.
 
 - Output **short Markdown** only. Start with one line: \`# Vertical edit — [date]\` then **one \`##\` per story** you cover on air (same order as ON_AIR), e.g. \`## 1 — OpenAI\`, \`## Wolves — headline\`.
-- Under each \`##\`, use **2–4 bullets max**. Allowed labels (pick what applies): **CAM** (you on camera), **GFX** (logo / ticker / lower third already in template), **STILL** (screenshot for this beat — name the domain or headline so it matches the JPEG), **NOTE** (one line: e.g. “reframe head left when STILL is up”).
+- Under each \`##\`, use **2–4 bullets max**. Allowed labels (pick what applies): **CAM** (you on camera), **GFX** (logo / ticker / lower third already in template), **STILL** (screenshot for this beat — name the domain or headline so it matches the JPEG; grabs are **full article width** on purpose — **mask / position in the FCP compound clip** so headline + art fit the slide), **NOTE** (e.g. “head left when STILL is up” or “mask still to safe area”).
 - **Do not** use long shot lists, **B-ROLL** of scrolling sites, **SOT**, or a **~5-minute** / cinematic edit plan. Keep it **fast to scan** between teleprompter and timeline.
 - Mention **STILL** once per story that uses a source screenshot; align order with **<<<SOURCES>>>**.
 - This block is **not** read on camera — editor notes only.
@@ -773,7 +773,7 @@ Kyle’s workflow: **one vertical single take** (talking head), **template** wit
         contentType: 'image/jpeg',
       }));
       const names = kept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nCapture: SCREENSHOT_MODE=${process.env.SCREENSHOT_MODE ?? 'content'} (content crop; max size SCREENSHOT_MAX_CONTENT_HEIGHT × SCREENSHOT_MAX_CONTENT_WIDTH, GitHub: SCREENSHOT_MAX_CONTENT_WIDTH_GITHUB); viewport ${process.env.SCREENSHOT_WIDTH ?? '(720)'}×${process.env.SCREENSHOT_HEIGHT ?? '(1280)'}; JPEG quality SCREENSHOT_JPEG_QUALITY; DPR SCREENSHOT_DEVICE_SCALE_FACTOR. SCREENSHOT_FULL_PAGE=1 = full scroll. Failed or skipped URLs are listed below if any.\n`;
+      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nCapture: SCREENSHOT_MODE=${process.env.SCREENSHOT_MODE ?? 'content'} (content crop; max height SCREENSHOT_MAX_CONTENT_HEIGHT; optional center width cap SCREENSHOT_MAX_CONTENT_WIDTH / _GITHUB if set — default full column width for FCP masking). Viewport ${process.env.SCREENSHOT_WIDTH ?? '(720)'}×${process.env.SCREENSHOT_HEIGHT ?? '(1280)'}; JPEG SCREENSHOT_JPEG_QUALITY; DPR SCREENSHOT_DEVICE_SCALE_FACTOR. SCREENSHOT_FULL_PAGE=1 = full scroll. Failed or skipped URLs are listed below if any.\n`;
       screenshotBannerHtml =
         `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
         `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
