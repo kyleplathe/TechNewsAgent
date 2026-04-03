@@ -57,26 +57,44 @@ async function getTickerData(): Promise<string> {
   return `BTC: ${btcPrice}  |  BLOCK: ${blockHeight}  |  ${today}  |  LIVE FROM LINDEN HILLS`;
 }
 
-/** Caption / description block for Reels, Shorts, TikTok, X, Threads, etc. */
+/** Stable hash for the same calendar day (Chicago) so caption rotates daily, not every run. */
+function hashDayKey(dayKey: string): number {
+  let h = 0;
+  for (let i = 0; i < dayKey.length; i++) {
+    h = (h * 31 + dayKey.charCodeAt(i)) >>> 0;
+  }
+  return h;
+}
+
+/** Caption / description block for Reels, Shorts, TikTok, X, Threads, etc. — picks a variant by day. */
 function buildSocialMediaCaption(): string {
+  const tz = 'America/Chicago';
   const when = new Date().toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-    timeZone: 'America/Chicago',
+    timeZone: tz,
   });
-  return [
-    `Tech News Daily with Kyle · ${when}`,
-    '',
-    'Your daily tech briefing — the stories that matter, without the doom-scroll. Quick hits, clear context, and what it means for you.',
-    '',
-    'New episode every day. Follow so you catch the next rundown the moment it drops — easiest way to stay ahead of what is moving in tech.',
-    '',
-    'Follow for the freshest daily tech news.',
-    '',
+  const dayKey = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+  const v = hashDayKey(dayKey);
+
+  const tagSets = [
     '#TechNews #TechNewsDaily #Technology #TechTok #DailyTechNews',
-  ].join('\n');
+    '#TechNews #Minneapolis #LindenHills #TechTok #DailyTechNews',
+    '#TechNewsDaily #Technology #Apple #TechTok #News',
+  ];
+  const tags = tagSets[v % tagSets.length];
+
+  const bodies: string[] = [
+    `Tech News Daily with Kyle · ${when}\n\nQuick bench rundown — what moved in tech, minus the doom-scroll. New drop every day.\n\n${tags}`,
+    `${when} · From the Linden Hills bench: your fast tech hit list. Follow for the next one.\n\n${tags}`,
+    `Daily tech briefing with Kyle (${when}). Stories that matter, straight talk, no filler.\n\n${tags}`,
+    `Bench report · ${when}. Tech news you can use before the day gets away from you.\n\n${tags}`,
+    `Kyle · Tech News Daily · ${when}\n\nShort, sharp, daily. Tap follow so you don’t miss tomorrow’s rundown.\n\n${tags}`,
+    `${when} — tech news from the shop. One take, real context.\n\n${tags}`,
+  ];
+  return bodies[v % bodies.length];
 }
 
 type Collected = {
@@ -522,26 +540,28 @@ ${storyPickRule}
 - Skateboarding: use **[SKATE]** sources for one quick, legit skate beat (premiere, SOTY/contest/news). Skip if nothing’s good.
 - **Linden Hills** — the shops, blocks, and neighborhood feel (near Lake Harriet, the usual haunts) — is **your on-camera color**, not something to pull from a city news feed.
 - For the Linden Hills close: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) and tell viewers to check them out. Use this pitch line: **${localBizPitch}** **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? ` Use this extra note: ${localBizNote}` : ''}
-- Keep it tight for **about 60 seconds** read aloud.
+- Keep it tight for **about 60–120 seconds** read aloud (vertical single-take pace).
+- **Visuals are screenshot stills only** (one static grab per story in the edit). **Do not** promise a “full preview,” “full-screen walkthrough,” “we’ll pull that up later,” “live on screen,” or scrolling through the site on camera — you are **not** doing that. Refer to sources as “on the screenshot,” “in the grab,” or “headline on screen” if needed.
 
 You are writing for a **small professional studio**: one column is the **video / post prompt** (for Final Cut), the other is **on-air copy** (teleprompter / VO only).
 
 ${segmentOrderBlock}
 
 **LOCKSTEP PARITY (VIDEO_PROMPT and ON_AIR must match 1:1):**
-- ${parityStories} (same company, product, headline topic, order). **No** B-roll, GFX, or domains in VIDEO_PROMPT for a story you do **not** say on air; **no** on-air beats that VIDEO_PROMPT does not cover.
-- Use the **same beat order** in both columns (${beatOrderPhrase}). If you use \`##\` headings or sub-labels in VIDEO_PROMPT (e.g. TECH 1 / TECH 2), ON_AIR must follow that same sequence.
-- VIDEO_PROMPT is the **edit map for this exact VO** — not a wish list. Do not add extra topics, products, or games in either column that the other column omits.
+- ${parityStories} (same company, product, headline topic, order). **No** extra beats in VIDEO_PROMPT for a story you do **not** say on air; **no** on-air beats that VIDEO_PROMPT does not cover.
+- Use the **same beat order** in both columns (${beatOrderPhrase}). If you use \`##\` headings in VIDEO_PROMPT, ON_AIR must follow that same sequence.
+- VIDEO_PROMPT is a **minimal vertical edit cheat sheet** for this VO — not a wish list. Do not add extra topics in either column that the other omits.
 
 ---
 
-**COLUMN A — VIDEO PROMPT (Markdown — editor / Final Cut template / screenshots):**
-- Output **valid Markdown** (not plain prose paragraphs). Structure it so you can paste into a doc or sidecar for a **~5-minute** cut: one \`##\` heading per story beat (e.g. \`## Tech — OpenAI\`, \`## Wolves\`), then under each heading use **bullet lists** for shots.
-- Start with a single \`# Morning bench — edit map\` (or similar) title line, then segments in order: **tech beats** (use \`###\` subheads if you split multiple tech stories), **Wolves**, **Linden Hills**.
-- Each shot line: lead with a **bold** label — **CAM**, **B-ROLL**, **GFX**, **LOWER THIRD**, **FULL SCREEN**, **CUT**, **HOLD**, **SOT** — then the note (e.g. \`- **B-ROLL**: homepage grab — opencode.ai\`).
-- Mirror ON_AIR **beat-for-beat**: each spoken block in ON_AIR must have a matching \`##\` / list section **in the same order**.
-- Reference URLs or domains where useful for grab/screenshot **only** for stories you also say on air.
-- This block is **not** read on camera — it’s for **you / the edit**.
+**COLUMN A — VIDEO PROMPT (Markdown — minimal vertical / Final Cut):**
+Kyle’s workflow: **one vertical single take** (talking head), **template** with logo + ticker, **one numbered screenshot still per story** (files land in the linked folder in script order — blade the compound clip per beat). No browser demo, no “full preview” segment.
+
+- Output **short Markdown** only. Start with one line: \`# Vertical edit — [date]\` then **one \`##\` per story** you cover on air (same order as ON_AIR), e.g. \`## 1 — OpenAI\`, \`## Wolves — headline\`.
+- Under each \`##\`, use **2–4 bullets max**. Allowed labels (pick what applies): **CAM** (you on camera), **GFX** (logo / ticker / lower third already in template), **STILL** (screenshot for this beat — name the domain or headline so it matches the JPEG), **NOTE** (one line: e.g. “reframe head left when STILL is up”).
+- **Do not** use long shot lists, **B-ROLL** of scrolling sites, **SOT**, or a **~5-minute** / cinematic edit plan. Keep it **fast to scan** between teleprompter and timeline.
+- Mention **STILL** once per story that uses a source screenshot; align order with **<<<SOURCES>>>**.
+- This block is **not** read on camera — editor notes only.
 
 ---
 
@@ -556,7 +576,7 @@ ${segmentOrderBlock}
 **OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
 
 <<<VIDEO_PROMPT>>>
-(Markdown edit map: \`#\` / \`##\` / \`###\`, bullet shot lists with **CAM** / **B-ROLL** / **GFX** / etc. Same stories and order as ON_AIR. Segment order: ${beatOrderPhrase}.)
+(Minimal vertical Markdown: \`#\` + one \`##\` per story, short bullets **CAM** / **GFX** / **STILL** / **NOTE** only. Screenshots stills — no full-page preview beats. Same stories and order as ON_AIR. Segment order: ${beatOrderPhrase}.)
 
 <<<ON_AIR>>>
 (ALL CAPS spoken script only — same stories and order as VIDEO_PROMPT above; no bracketed shot notes.)
@@ -753,7 +773,7 @@ ${segmentOrderBlock}
         contentType: 'image/jpeg',
       }));
       const names = kept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nCapture: SCREENSHOT_MODE=${process.env.SCREENSHOT_MODE ?? 'content'} (content = article/main crop, max height SCREENSHOT_MAX_CONTENT_HEIGHT); viewport ${process.env.SCREENSHOT_WIDTH ?? '(720)'}×${process.env.SCREENSHOT_HEIGHT ?? '(1280)'}. SCREENSHOT_FULL_PAGE=1 = full scroll. Failed or skipped URLs are listed below if any.\n`;
+      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nCapture: SCREENSHOT_MODE=${process.env.SCREENSHOT_MODE ?? 'content'} (content crop; max size SCREENSHOT_MAX_CONTENT_HEIGHT × SCREENSHOT_MAX_CONTENT_WIDTH, GitHub: SCREENSHOT_MAX_CONTENT_WIDTH_GITHUB); viewport ${process.env.SCREENSHOT_WIDTH ?? '(720)'}×${process.env.SCREENSHOT_HEIGHT ?? '(1280)'}; JPEG quality SCREENSHOT_JPEG_QUALITY; DPR SCREENSHOT_DEVICE_SCALE_FACTOR. SCREENSHOT_FULL_PAGE=1 = full scroll. Failed or skipped URLs are listed below if any.\n`;
       screenshotBannerHtml =
         `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
         `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(

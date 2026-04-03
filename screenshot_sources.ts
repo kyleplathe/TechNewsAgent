@@ -82,7 +82,55 @@ function screenshotMode(): 'viewport' | 'content' | 'fullpage' {
 function maxContentHeightPx(): number {
   return Math.min(
     8000,
-    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '2200', 10) || 2200)
+    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '1500', 10) || 1500)
+  );
+}
+
+/** Cap crop width (centered) so stills aren’t huge in 9:16 PiP; GitHub gets a wider cap (less “zoomed column”). */
+function maxContentWidthForHost(hostname: string): number {
+  const h = hostname.toLowerCase();
+  if (
+    h === 'github.com' ||
+    h === 'gist.github.com' ||
+    h.endsWith('.github.com') ||
+    h === 'github.blog'
+  ) {
+    return Math.min(
+      2000,
+      Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_WIDTH_GITHUB ?? '900', 10) || 900)
+    );
+  }
+  return Math.min(
+    2000,
+    Math.max(280, parseInt(process.env.SCREENSHOT_MAX_CONTENT_WIDTH ?? '680', 10) || 680)
+  );
+}
+
+function applyMaxWidthToClip(
+  clip: { x: number; y: number; width: number; height: number },
+  maxW: number
+): { x: number; y: number; width: number; height: number } {
+  if (clip.width <= maxW) return clip;
+  const shave = clip.width - maxW;
+  return {
+    x: clip.x + shave / 2,
+    y: clip.y,
+    width: maxW,
+    height: clip.height,
+  };
+}
+
+function jpegQuality(): number {
+  return Math.min(
+    95,
+    Math.max(50, parseInt(process.env.SCREENSHOT_JPEG_QUALITY ?? '82', 10) || 82)
+  );
+}
+
+function deviceScaleFactor(): number {
+  return Math.min(
+    3,
+    Math.max(1, parseInt(process.env.SCREENSHOT_DEVICE_SCALE_FACTOR ?? '1', 10) || 1)
   );
 }
 
@@ -120,6 +168,15 @@ const CANIS_HOOPUS_EXTRA_SELECTORS = [
   '.l-wrapper',
 ];
 
+/** GitHub — prefer article body over a tight inner column when possible. */
+const GITHUB_EXTRA_SELECTORS = [
+  '[data-testid="issue-viewer-container"]',
+  'article.markdown-body',
+  '.markdown-body',
+  'main .application-main main',
+  'main',
+];
+
 function contentSelectorListForHost(hostname: string): string[] {
   const custom = process.env.SCREENSHOT_CONTENT_SELECTOR?.trim();
   const host = hostname.toLowerCase();
@@ -131,6 +188,13 @@ function contentSelectorListForHost(hostname: string): string[] {
     host.endsWith('.canishoopus.com')
   ) {
     prepend = [...CANIS_HOOPUS_EXTRA_SELECTORS];
+  } else if (
+    host === 'github.com' ||
+    host === 'gist.github.com' ||
+    host.endsWith('.github.com') ||
+    host === 'github.blog'
+  ) {
+    prepend = [...GITHUB_EXTRA_SELECTORS];
   }
 
   const base = custom
@@ -276,11 +340,12 @@ async function primeLazyMedia(page: Page): Promise<void> {
  * an endless full-page scroll — both common sources of “huge white space” in vertical edits.
  */
 async function captureScreenshot(page: Page): Promise<Buffer> {
+  const jq = jpegQuality();
   if (fullPage()) {
     return Buffer.from(
       await page.screenshot({
         type: 'jpeg',
-        quality: 85,
+        quality: jq,
         fullPage: true,
       })
     );
@@ -289,12 +354,12 @@ async function captureScreenshot(page: Page): Promise<Buffer> {
   const mode = screenshotMode();
   if (mode === 'viewport') {
     return Buffer.from(
-      await page.screenshot({ type: 'jpeg', quality: 85, fullPage: false })
+      await page.screenshot({ type: 'jpeg', quality: jq, fullPage: false })
     );
   }
   if (mode === 'fullpage') {
     return Buffer.from(
-      await page.screenshot({ type: 'jpeg', quality: 85, fullPage: true })
+      await page.screenshot({ type: 'jpeg', quality: jq, fullPage: true })
     );
   }
 
@@ -322,12 +387,13 @@ async function captureScreenshot(page: Page): Promise<Buffer> {
       const box = await loc.boundingBox();
       if (!box || box.width < minContentWidth || box.height < 80) continue;
 
-      const clip = await clipForContentRegion(loc, box, maxH);
+      let clip = await clipForContentRegion(loc, box, maxH);
+      clip = applyMaxWidthToClip(clip, maxContentWidthForHost(host));
       // fullPage so `clip` can reach content above/below the initial viewport.
       return Buffer.from(
         await page.screenshot({
           type: 'jpeg',
-          quality: 85,
+          quality: jq,
           fullPage: true,
           clip,
         })
@@ -338,7 +404,7 @@ async function captureScreenshot(page: Page): Promise<Buffer> {
   }
 
   return Buffer.from(
-    await page.screenshot({ type: 'jpeg', quality: 85, fullPage: false })
+    await page.screenshot({ type: 'jpeg', quality: jq, fullPage: false })
   );
 }
 
@@ -391,18 +457,20 @@ export async function screenshotSources(
   const timeout = navTimeoutMs();
   const delay = settleMs();
 
+  const dpr = deviceScaleFactor();
   const context = await browser.newContext(
     mobileMode()
       ? {
           viewport: { width, height },
           isMobile: true,
           hasTouch: true,
-          deviceScaleFactor: 3,
+          deviceScaleFactor: dpr,
           userAgent:
             'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
         }
       : {
           viewport: { width, height },
+          deviceScaleFactor: dpr,
           userAgent:
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         }
