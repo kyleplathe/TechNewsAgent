@@ -205,6 +205,27 @@ function parseDateSafe(v: string): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
+/** Default windows; tighten with MAX_STORY_AGE_HOURS_TECH=12 (etc.) in `.env`. */
+const DEFAULT_MAX_STORY_AGE_HOURS: Record<Collected['section'], number> = {
+  LOCAL: 24,
+  SKATE: 48,
+  TECH: 48,
+  HARDWARE: 72,
+};
+
+function maxStoryAgeMsForSection(section: Collected['section']): number {
+  const envKey = `MAX_STORY_AGE_HOURS_${section}` as const;
+  const raw = process.env[envKey];
+  if (raw !== undefined && raw.trim() !== '') {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n) && n > 0) {
+      return n * 60 * 60 * 1000;
+    }
+  }
+  const hours = DEFAULT_MAX_STORY_AGE_HOURS[section];
+  return hours * 60 * 60 * 1000;
+}
+
 function isFreshForSection(item: Collected): boolean {
   const d = parseDateSafe(item.date);
   if (!d && item.section === 'LOCAL') {
@@ -213,15 +234,28 @@ function isFreshForSection(item: Collected): boolean {
   }
   if (!d) return true;
   const ageMs = Date.now() - d.getTime();
-  const maxAgeMs =
-    item.section === 'LOCAL'
-      ? 24 * 60 * 60 * 1000
-      : item.section === 'SKATE'
-        ? 48 * 60 * 60 * 1000
-        : item.section === 'TECH'
-          ? 48 * 60 * 60 * 1000
-          : 72 * 60 * 60 * 1000;
+  const maxAgeMs = maxStoryAgeMsForSection(item.section);
   return ageMs <= maxAgeMs;
+}
+
+/**
+ * No altcoin / “crypto industry” beats — Bitcoin-only for digital-asset headlines.
+ * `\bcrypto\b` avoids matching “cryptography”. Set BITCOIN_ONLY_CURRENCY_RULE=0 to skip.
+ */
+const EXPLICIT_NON_BITCOIN_ASSET_RE =
+  /\b(ethereum|\beth\b|erc-?\s*20|solana|cardano|polkadot|dogecoin|\bxrp\b|litecoin|\bltc\b|monero|\bxlm\b|avalanche|\bpolygon\b|chainlink|uniswap|cosmos\s+hub|sui\b|aptos|algorand|fantom|near\s+protocol|\bnft\b|nfts|\bdefi\b|web3|stablecoin|stablecoins|memecoin|memecoins|tether|\busdt\b|\busdc\b|\bdai\b|airdrop|\bico\b|binance\s+coin|\bbnb\b|\btron\b|stellar\s+lumens|ripple(?!\s+effect)|proof\s+of\s+stake)\b/i;
+
+const BITCOIN_HEADLINE_SIGNAL_RE =
+  /\b(bitcoin|btc)\b|spot\s+bitcoin|bitcoin\s+etf|\bsatoshi\b|\bhalving\b|taproot|lightning\s+network|bit\s+coin/i;
+
+function passesBitcoinOnlyCurrencyRule(title: string): boolean {
+  if (process.env.BITCOIN_ONLY_CURRENCY_RULE === '0') return true;
+  const t = title;
+  if (EXPLICIT_NON_BITCOIN_ASSET_RE.test(t)) return false;
+  if (/\bcrypto\b|\bcryptocurrenc(y|ies)\b/i.test(t)) {
+    return BITCOIN_HEADLINE_SIGNAL_RE.test(t);
+  }
+  return true;
 }
 
 async function readAirLog(path: string): Promise<AirLogEntry[]> {
@@ -314,8 +348,12 @@ async function runNewsAgent() {
     // Best-effort (may be blocked/changed)
     'https://theberrics.com/feed',
   ];
-  /** Local = Wolves only (no neighborhood paper — avoids non-tech city/gossip). */
-  const localFeeds = ['https://www.canishoopus.com/rss/current.xml'];
+  /**
+   * Local = Wolves: Canis Hoopus Atom feed (Timberwolves + occasional Lynx; fan perspective).
+   * Note: https://www.canishoopus.com/feed is the **community HTML** “The Feed”, not RSS — use /rss below.
+   * `current.xml` 301s here; canonical avoids an extra hop.
+   */
+  const localFeeds = ['https://www.canishoopus.com/rss/index.xml'];
 
   let collected: Collected[] = [];
 
@@ -357,6 +395,31 @@ async function runNewsAgent() {
   await pull(skateFeeds, 'SKATE');
   await pull(localFeeds, 'LOCAL');
 
+  try {
+    const { fetchTimberwolvesNewsFromNbaCom } = await import('./nba_wolves_news');
+    const nbaWolves = await fetchTimberwolvesNewsFromNbaCom();
+    const cap = Math.min(20, Math.max(1, perFeed));
+    let added = 0;
+    for (const item of nbaWolves) {
+      if (added >= cap) break;
+      collected.push({
+        section: 'LOCAL',
+        feedTitle: 'NBA.com — Minnesota Timberwolves',
+        title: item.title,
+        link: item.link,
+        date: item.date,
+      });
+      added++;
+    }
+    if (added) {
+      console.log(
+        `  NBA.com Timberwolves (embedded index) → ${added} stor${added === 1 ? 'y' : 'ies'} (cap ${cap})`
+      );
+    }
+  } catch (e) {
+    console.warn('NBA.com Timberwolves index fetch failed:', e);
+  }
+
   if (!collected.length) {
     throw new Error('No stories parsed from any feed — check URLs or network.');
   }
@@ -371,9 +434,11 @@ async function runNewsAgent() {
     return true;
   });
 
+  collected = collected.filter((c) => passesBitcoinOnlyCurrencyRule(c.title));
+
   if (!collected.length) {
     throw new Error(
-      'All candidate stories were filtered out by freshness/repeat rules. Try lowering STORY_REPEAT_COOLDOWN_DAYS.'
+      'All candidate stories were filtered out by freshness, Bitcoin-only currency rule, or repeat rules. Try adjusting MAX_STORY_AGE_HOURS_* , BITCOIN_ONLY_CURRENCY_RULE=0, or STORY_REPEAT_COOLDOWN_DAYS.'
     );
   }
 
@@ -427,7 +492,7 @@ async function runNewsAgent() {
     ? `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
 2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
-3) **THEN WOLVES** (Timberwolves — from **[LOCAL]** RSS only, and only if the item is from the last 24 hours).
+3) **THEN WOLVES** (Timberwolves — from **[LOCAL]** items: Canis Hoopus RSS plus official **NBA.com** Timberwolves index; only if the item is from the last 24 hours).
 4) **THEN LINDEN HILLS** neighborhood color: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) with a quick “go check them out” recommendation. Use this pitch line: **${localBizPitch}** Then add a small Linden Hills vibe note (Lake Harriet / morning shop energy). **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? `\n   - Extra note for the plug: ${localBizNote}` : ''}`
     : `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
@@ -451,8 +516,9 @@ QUALITY RULES:
 ${storyPickRule}
 - If a headline includes a year like "(2024)", that is usually the article’s original date, not “breaking today.” Say “making the rounds” or “people are digging into…” unless it’s clearly new.
 - Do not invent products, prices, or dates. Stay close to the headlines.
+- **Digital money / chains:** The show is **Bitcoin-only**. Do **not** cover altcoins, stablecoins, NFT/DeFi/Web3 industry, or generic **“crypto”** as an asset class. **Do** cover **Bitcoin** when a sourced headline is clearly about Bitcoin (ETFs, adoption, mining, Lightning, regulation aimed at Bitcoin, etc.). On air, avoid saying **“crypto”** as a bucket — say **Bitcoin** or neutral tech wording.
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
-- The only **local RSS** input is **Wolves / NBA** — use it for the basketball beat **only if** the item is from the **last 24 hours**; if the Wolves headline is older, skip Wolves entirely.
+- **Wolves / LOCAL** stories come from **Canis Hoopus (RSS)** and the **official NBA.com Timberwolves news index** (same **[LOCAL]** list). Use the basketball beat **only if** the item is from the **last 24 hours**; if nothing qualifies, skip Wolves entirely.
 - Skateboarding: use **[SKATE]** sources for one quick, legit skate beat (premiere, SOTY/contest/news). Skip if nothing’s good.
 - **Linden Hills** — the shops, blocks, and neighborhood feel (near Lake Harriet, the usual haunts) — is **your on-camera color**, not something to pull from a city news feed.
 - For the Linden Hills close: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) and tell viewers to check them out. Use this pitch line: **${localBizPitch}** **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? ` Use this extra note: ${localBizNote}` : ''}
@@ -687,11 +753,11 @@ ${segmentOrderBlock}
         contentType: 'image/jpeg',
       }));
       const names = kept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nViewport default ${process.env.SCREENSHOT_WIDTH ?? '1280'}×${process.env.SCREENSHOT_HEIGHT ?? '720'}; set SCREENSHOT_FULL_PAGE=1 for full scroll. Failed or skipped URLs are listed below if any.\n`;
+      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nCapture: SCREENSHOT_MODE=${process.env.SCREENSHOT_MODE ?? 'content'} (content = article/main crop, max height SCREENSHOT_MAX_CONTENT_HEIGHT); viewport ${process.env.SCREENSHOT_WIDTH ?? '(720)'}×${process.env.SCREENSHOT_HEIGHT ?? '(1280)'}. SCREENSHOT_FULL_PAGE=1 = full scroll. Failed or skipped URLs are listed below if any.\n`;
       screenshotBannerHtml =
         `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
         `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
-          `${kept.length} JPEG(s) attached (${names}). Default viewport grab; paywalls / bot blocking may produce partial or error pages.`
+          `${kept.length} JPEG(s) attached (${names}). Default is a content-region crop (article/main) to cut empty margins; paywalls / bot blocking may produce partial or error pages.`
         )}</p>`;
     }
     if (shotFails.length) {

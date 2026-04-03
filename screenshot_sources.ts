@@ -1,4 +1,4 @@
-import { chromium, type Browser } from 'playwright';
+import { chromium, type Browser, type Locator, type Page } from 'playwright';
 
 export type SourceShotInput = {
   storyIndex: number;
@@ -71,6 +71,277 @@ function fullPage(): boolean {
   return v === '1' || v === 'true' || v === 'yes';
 }
 
+/** viewport = old behavior; content = crop to article/main (less empty margin); fullpage = whole scrollable document. */
+function screenshotMode(): 'viewport' | 'content' | 'fullpage' {
+  const m = (process.env.SCREENSHOT_MODE ?? 'content').trim().toLowerCase();
+  if (m === 'viewport') return 'viewport';
+  if (m === 'fullpage' || m === 'full_page') return 'fullpage';
+  return 'content';
+}
+
+function maxContentHeightPx(): number {
+  return Math.min(
+    8000,
+    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '2200', 10) || 2200)
+  );
+}
+
+/** Prefer specific article bodies over full-width `main` (often mostly whitespace on news sites). */
+const DEFAULT_CONTENT_SELECTORS = [
+  'article',
+  '[role="article"]',
+  'main article',
+  'main [data-testid="article-body"]',
+  '[data-testid="article-body"]',
+  '.article-body',
+  '.post-content',
+  '.entry-content',
+  '.story-body',
+  '.article__content',
+  'main',
+  '[role="main"]',
+];
+
+/**
+ * Future / Tom's-style layouts: giant empty ad band between nav and story — inner
+ * selectors beat `main` when they exist.
+ */
+const TOMS_HARDWARE_EXTRA_SELECTORS = [
+  '.article-content',
+  '.article-v2__content',
+  '.article__body',
+  '.article__container',
+];
+
+/** SB Nation / Vox — hero images are often lazy-loaded below the fold. */
+const CANIS_HOOPUS_EXTRA_SELECTORS = [
+  '.c-entry-content',
+  '.l-col__main',
+  '.l-wrapper',
+];
+
+function contentSelectorListForHost(hostname: string): string[] {
+  const custom = process.env.SCREENSHOT_CONTENT_SELECTOR?.trim();
+  const host = hostname.toLowerCase();
+  let prepend: string[] = [];
+  if (host === 'tomshardware.com' || host.endsWith('.tomshardware.com')) {
+    prepend = [...TOMS_HARDWARE_EXTRA_SELECTORS];
+  } else if (
+    host === 'canishoopus.com' ||
+    host.endsWith('.canishoopus.com')
+  ) {
+    prepend = [...CANIS_HOOPUS_EXTRA_SELECTORS];
+  }
+
+  const base = custom
+    ? [custom, ...DEFAULT_CONTENT_SELECTORS.filter((s) => s !== custom)]
+    : [...DEFAULT_CONTENT_SELECTORS];
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of [...prepend, ...base]) {
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+function trimHeadlineGapEnabled(): boolean {
+  const v = process.env.SCREENSHOT_TRIM_HEADLINE_GAP?.trim().toLowerCase();
+  return v !== '0' && v !== 'false' && v !== 'no';
+}
+
+/**
+ * Many news pages stack nav + trending + empty ad slots above the real headline inside the
+ * same `main`/`article` box. Cropping from the first `h1` drops that dead space so the hero
+ * image fits better in 9:16 PiP.
+ */
+async function clipForContentRegion(
+  loc: Locator,
+  box: { x: number; y: number; width: number; height: number },
+  maxH: number
+): Promise<{ x: number; y: number; width: number; height: number }> {
+  const base = {
+    x: Math.max(0, box.x),
+    y: Math.max(0, box.y),
+    width: box.width,
+    height: Math.min(box.height, maxH),
+  };
+
+  if (!trimHeadlineGapEnabled()) return base;
+
+  const gapThreshold = Math.max(
+    24,
+    parseInt(process.env.SCREENSHOT_TRIM_GAP_ABOVE_H1_PX ?? '56', 10) || 56
+  );
+  const headPad = Math.max(
+    0,
+    parseInt(process.env.SCREENSHOT_HEADLINE_PAD_PX ?? '10', 10) || 10
+  );
+
+  const h1 = loc.locator('h1').first();
+  try {
+    if ((await h1.count()) === 0) return base;
+    await h1.scrollIntoViewIfNeeded().catch(() => {});
+    if (!(await h1.isVisible().catch(() => false))) return base;
+    const h1Box = await h1.boundingBox();
+    if (!h1Box) return base;
+
+    const gapTop = h1Box.y - box.y;
+    if (gapTop < gapThreshold) return base;
+
+    const y = Math.max(0, h1Box.y - headPad);
+    const bottom = box.y + box.height;
+    const height = Math.min(maxH, bottom - y);
+    if (height < 160) return base;
+
+    return {
+      x: Math.max(0, box.x),
+      y,
+      width: box.width,
+      height,
+    };
+  } catch {
+    return base;
+  }
+}
+
+function primeLazyMediaEnabled(): boolean {
+  const v = process.env.SCREENSHOT_PRIME_LAZY_MEDIA?.trim().toLowerCase();
+  return v !== '0' && v !== 'false' && v !== 'no';
+}
+
+/**
+ * Scrolls through the page and nudges lazy `img` / `data-src` so SB Nation and similar sites
+ * actually paint hero images before we clip (fixes empty gray boxes on Canis Hoopus).
+ */
+async function primeLazyMedia(page: Page): Promise<void> {
+  if (!primeLazyMediaEnabled()) return;
+
+  await page
+    .evaluate(() => {
+      for (const img of document.querySelectorAll('img')) {
+        const el = img as HTMLImageElement;
+        if (el.loading === 'lazy') el.loading = 'eager';
+        const ds = el.getAttribute('data-src');
+        if (ds && (!el.getAttribute('src') || el.src.startsWith('data:'))) {
+          el.src = ds;
+        }
+        const dss = el.getAttribute('data-srcset');
+        if (dss && !el.getAttribute('srcset')) {
+          el.srcset = dss;
+        }
+      }
+    })
+    .catch(() => {});
+
+  const steps = Math.min(
+    24,
+    Math.max(2, parseInt(process.env.SCREENSHOT_SCROLL_STEPS ?? '8', 10) || 8)
+  );
+  const pause = Math.min(
+    500,
+    Math.max(40, parseInt(process.env.SCREENSHOT_SCROLL_PAUSE_MS ?? '100', 10) || 100)
+  );
+  const post = Math.min(
+    2500,
+    Math.max(0, parseInt(process.env.SCREENSHOT_POST_SCROLL_SETTLE_MS ?? '450', 10) || 450)
+  );
+
+  for (let i = 0; i <= steps; i++) {
+    const frac = steps === 0 ? 0 : i / steps;
+    await page
+      .evaluate((f) => {
+        const root = document.scrollingElement ?? document.documentElement;
+        const h = Math.max(0, root.scrollHeight - root.clientHeight);
+        root.scrollTop = Math.floor(h * f);
+      }, frac)
+      .catch(() => {});
+    await new Promise((r) => setTimeout(r, pause));
+  }
+
+  await page
+    .evaluate(() => {
+      const root = document.scrollingElement ?? document.documentElement;
+      root.scrollTop = 0;
+    })
+    .catch(() => {});
+
+  if (post > 0) await new Promise((r) => setTimeout(r, post));
+}
+
+/**
+ * Prefer a tight crop on the story column (headline + lede) instead of the full viewport or
+ * an endless full-page scroll — both common sources of “huge white space” in vertical edits.
+ */
+async function captureScreenshot(page: Page): Promise<Buffer> {
+  if (fullPage()) {
+    return Buffer.from(
+      await page.screenshot({
+        type: 'jpeg',
+        quality: 85,
+        fullPage: true,
+      })
+    );
+  }
+
+  const mode = screenshotMode();
+  if (mode === 'viewport') {
+    return Buffer.from(
+      await page.screenshot({ type: 'jpeg', quality: 85, fullPage: false })
+    );
+  }
+  if (mode === 'fullpage') {
+    return Buffer.from(
+      await page.screenshot({ type: 'jpeg', quality: 85, fullPage: true })
+    );
+  }
+
+  const maxH = maxContentHeightPx();
+  /** Skip tiny chrome boxes (nav chips, etc.). */
+  const minContentWidth = Math.min(
+    320,
+    Math.max(160, parseInt(process.env.SCREENSHOT_MIN_CONTENT_WIDTH ?? '200', 10) || 200)
+  );
+
+  let host = '';
+  try {
+    host = new URL(page.url()).hostname;
+  } catch {
+    host = '';
+  }
+
+  for (const sel of contentSelectorListForHost(host)) {
+    const loc = page.locator(sel).first();
+    try {
+      if ((await loc.count()) === 0) continue;
+      await loc.scrollIntoViewIfNeeded().catch(() => {});
+      const vis = await loc.isVisible().catch(() => false);
+      if (!vis) continue;
+      const box = await loc.boundingBox();
+      if (!box || box.width < minContentWidth || box.height < 80) continue;
+
+      const clip = await clipForContentRegion(loc, box, maxH);
+      // fullPage so `clip` can reach content above/below the initial viewport.
+      return Buffer.from(
+        await page.screenshot({
+          type: 'jpeg',
+          quality: 85,
+          fullPage: true,
+          clip,
+        })
+      );
+    } catch {
+      continue;
+    }
+  }
+
+  return Buffer.from(
+    await page.screenshot({ type: 'jpeg', quality: 85, fullPage: false })
+  );
+}
+
 /**
  * Above-the-fold (or full-page) JPEG grabs for edit B-roll. Skips non-http(s) links.
  * Uses one browser context; one page per URL so failures do not taint the next load.
@@ -119,7 +390,6 @@ export async function screenshotSources(
   const { width, height } = viewport();
   const timeout = navTimeoutMs();
   const delay = settleMs();
-  const fp = fullPage();
 
   const context = await browser.newContext(
     mobileMode()
@@ -151,15 +421,12 @@ export async function screenshotSources(
         if (delay > 0) {
           await new Promise((r) => setTimeout(r, delay));
         }
-        const buf = await page.screenshot({
-          type: 'jpeg',
-          quality: 85,
-          fullPage: fp,
-        });
+        await primeLazyMedia(page);
+        const buf = await captureScreenshot(page);
         ok.push({
           storyIndex: it.storyIndex,
           filename,
-          content: Buffer.from(buf),
+          content: buf,
           link: it.link,
         });
         console.log(`  Screenshot OK #${it.storyIndex} → ${filename}`);
