@@ -45,16 +45,18 @@ function navTimeoutMs(): number {
   );
 }
 
+/** Default on: mobile Safari UA + iPhone-ish viewport so article column matches phone width. Set SCREENSHOT_MOBILE=0 for desktop layout. */
 function mobileMode(): boolean {
   const v = process.env.SCREENSHOT_MOBILE?.trim().toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes';
+  if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+  return true; // default: iPhone-width mobile UA + viewport
 }
 
 function viewport(): { width: number; height: number } {
-  // Default to portrait 9:16 so grabs can be used as vertical GFX.
-  // Override any time with SCREENSHOT_WIDTH / SCREENSHOT_HEIGHT.
-  const defaultW = mobileMode() ? 720 : 720;
-  const defaultH = mobileMode() ? 1280 : 1280;
+  // Mobile defaults ≈ iPhone portrait CSS px (393×852) for narrow grabs; desktop fallback 720×1280.
+  // Override with SCREENSHOT_WIDTH / SCREENSHOT_HEIGHT.
+  const defaultW = mobileMode() ? 393 : 720;
+  const defaultH = mobileMode() ? 852 : 1280;
   const width = Math.min(
     2560,
     Math.max(320, parseInt(process.env.SCREENSHOT_WIDTH ?? String(defaultW), 10) || defaultW)
@@ -81,20 +83,17 @@ function screenshotMode(): 'viewport' | 'content' | 'fullpage' {
 
 function maxContentHeightPx(): number {
   /**
-   * Long vertical strip: full **natural width** of the article column (no width cap by default),
-   * height capped here so you can **pan / mask / reposition** the still in FCP. Tune with
-   * `SCREENSHOT_MAX_CONTENT_HEIGHT` — no need to pass dimensions in code.
+   * Vertical extent of the **content crop** — a bit extra below the fold so you can nudge a
+   * shape mask in FCP, not a giant scroll. Width follows **viewport** (iPhone-narrow by default).
    */
   return Math.min(
     8000,
-    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '4000', 10) || 4000)
+    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '2400', 10) || 2400)
   );
 }
 
 /**
- * Optional center-crop max width. **Default: no cap** — captures full article column width so
- * long headlines aren’t clipped; reframe with a mask in the FCP compound clip.
- * Set `SCREENSHOT_MAX_CONTENT_WIDTH=720` (or similar) if you want narrower JPEGs again.
+ * Optional center-crop max width. Default: none — with mobile viewport, width is already phone-sized.
  */
 function parseOptionalMaxContentWidth(envKey: string): number | null {
   const raw = process.env[envKey]?.trim();

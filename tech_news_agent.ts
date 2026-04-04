@@ -476,8 +476,8 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const storyPickRule = `- Pick **3–6** total beats from **[TECH]**, **[HARDWARE]**, and **[SKATE]** numbered items **combined**. Lead with the strongest stories (software, AI, industry, security, platforms, etc.) and keep skate tight (one quick hitter if anything is truly good today).
-- **Hardware / devices** (phones, Macs, PCs, GPUs, wearables, accessories): include **only when** a **[HARDWARE]** item is **clearly new or newly newsworthy** — e.g. announcement, ship/preorder date, major spec drop, timely review wave, or a **fresh angle** on a product. **Do not** force a device beat every episode. **Do not** recycle the **same product** day after day when headlines are just rehashes or slow drip — skip and spend the time on better **[TECH]** stories instead.`;
+  const storyPickRule = `- Pick **3–5** beats from **[TECH]** + **[HARDWARE]** + **[SKATE]** combined (often **3–4** is right for a **single-take ~60–120s** read). Lead with strongest stories; skate = one quick hitter only if it’s genuinely good today.
+- **Hardware:** only when **[HARDWARE]** is clearly new / newsworthy; never force a device beat; don’t repeat the same product on slow news days.`;
 
   const hasWolves = collected.some((c) => c.section === 'LOCAL');
 
@@ -497,7 +497,7 @@ async function runNewsAgent() {
     : 'tech → skate → close';
 
   const parityStories =
-    'Decide your **3–5 covered stories** once. **Every** story you speak in ON_AIR must have a **matching** VIDEO_PROMPT beat';
+    'Pick your covered stories once (**usually 3–4**). **Every** ON_AIR beat needs a **matching** VIDEO_PROMPT \`##\`';
 
   const prompt = `
 You are a punchy, high-energy tech news anchor filming from your repair shop in Linden Hills (Minneapolis). You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
@@ -513,9 +513,8 @@ ${storyPickRule}
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
 - **Wolves / LOCAL** stories come from **Canis Hoopus (RSS)** and the **official NBA.com Timberwolves news index** (same **[LOCAL]** list). Use the basketball beat **only if** the item is from the **last 24 hours**; if nothing qualifies, skip Wolves entirely.
 - Skateboarding: use **[SKATE]** sources for one quick, legit skate beat (premiere, SOTY/contest/news). Skip if nothing’s good.
-- **No** second scripted local-business “shout-out” or mandatory plug — weave a shop or Linden Hills in **only if you already do** in your own wording.
-- Keep it tight for **about 60–120 seconds** read aloud (vertical single-take pace).
-- **Visuals are screenshot stills only** (one static grab per story in the edit). **Do not** promise a “full preview,” “full-screen walkthrough,” “we’ll pull that up later,” “live on screen,” or scrolling through the site on camera — you are **not** doing that. Refer to sources as “on the screenshot,” “in the grab,” or “headline on screen” if needed.
+- **No** second scripted local-business “shout-out” — mention a shop or Linden Hills **only if you already do**, naturally.
+- **One vertical take, ~60–120 seconds** read aloud at your pace — that target is still the show; nothing changed except **use fewer words**: no essay transitions (“building on that,” “wrapping up,” “let’s unpack”). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
 
 You are writing for a **small professional studio**: one column is the **video / post prompt** (for Final Cut), the other is **on-air copy** (teleprompter / VO only).
 
@@ -528,9 +527,11 @@ ${segmentOrderBlock}
 ---
 
 **COLUMN B — ON AIR (teleprompter / voiceover — spoken words only):**
-- **ALL CAPS.** Short lines. **Do not put [B-ROLL] or shot notes here** — those belong in VIDEO PROMPT only.
+- **ALL CAPS.** **Minimum word count** — each story is **1–3 short lines** (headline essence + one “why it matters” line max). No paragraphs, no recap of the whole web.
+- **Single continuous take** — write so it flows straight through after the open; no “first story / next up / finally” padding.
+- **Do not** put [B-ROLL] or shot notes here — VIDEO PROMPT only.
 - START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
-- **Enunciation (INLINE, not a list):** Put the phonetic right **next to the word on first mention**, immediately after it in parentheses — not at the end of the beat/section. Keep it short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye), MAMBA (MAM-buh). Spelled letters only for real acronyms (A I, G P U).
+- **Enunciation (INLINE):** phonetic in parentheses **on first mention only** next to the word — short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye). Real acronyms spelled: A I, G P U.
 - END exactly: BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
 
 ---
@@ -541,7 +542,7 @@ ${segmentOrderBlock}
 (Brief Markdown: \`#\` + \`##\` per story, 2–3 bullets; match ON_AIR order, ${beatOrderPhrase}.)
 
 <<<ON_AIR>>>
-(ALL CAPS spoken script only — same stories and order as VIDEO_PROMPT above; no bracketed shot notes.)
+(ALL CAPS — **lean** script, one take, ~60–120s; same story order as VIDEO_PROMPT; no bracketed shot notes.)
 
 <<<SOURCES>>>
 (Exactly **one line** after this marker: comma-separated 1-based story numbers from the list above, e.g. 2,5,7 — no other text on that line. **Order matters**: list the covered story numbers in the **same order you cover them on air** — first number = first beat, etc. Only include stories you actually covered.)
@@ -735,7 +736,7 @@ ${segmentOrderBlock}
         contentType: 'image/jpeg',
       }));
       const names = kept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nCapture: SCREENSHOT_MODE=${process.env.SCREENSHOT_MODE ?? 'content'} (content crop; max height SCREENSHOT_MAX_CONTENT_HEIGHT; optional center width cap SCREENSHOT_MAX_CONTENT_WIDTH / _GITHUB if set — default full column width for FCP masking). Viewport ${process.env.SCREENSHOT_WIDTH ?? '(720)'}×${process.env.SCREENSHOT_HEIGHT ?? '(1280)'}; JPEG SCREENSHOT_JPEG_QUALITY; DPR SCREENSHOT_DEVICE_SCALE_FACTOR. SCREENSHOT_FULL_PAGE=1 = full scroll. Failed or skipped URLs are listed below if any.\n`;
+      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nCapture: default **mobile / iPhone-width** viewport (393×852 unless SCREENSHOT_WIDTH/HEIGHT set; SCREENSHOT_MOBILE=0 for desktop layout). SCREENSHOT_MODE=${process.env.SCREENSHOT_MODE ?? 'content'}, max crop height SCREENSHOT_MAX_CONTENT_HEIGHT, optional width caps SCREENSHOT_MAX_CONTENT_WIDTH*. JPEG SCREENSHOT_JPEG_QUALITY; DPR SCREENSHOT_DEVICE_SCALE_FACTOR. SCREENSHOT_FULL_PAGE=1 = full scroll. Failed or skipped URLs below if any.\n`;
       screenshotBannerHtml =
         `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
         `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
