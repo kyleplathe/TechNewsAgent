@@ -80,10 +80,14 @@ function screenshotMode(): 'viewport' | 'content' | 'fullpage' {
 }
 
 function maxContentHeightPx(): number {
-  /** Tall enough for headline + hero in one still; mask/scale in FCP for PiP placement. */
+  /**
+   * Long vertical strip: full **natural width** of the article column (no width cap by default),
+   * height capped here so you can **pan / mask / reposition** the still in FCP. Tune with
+   * `SCREENSHOT_MAX_CONTENT_HEIGHT` — no need to pass dimensions in code.
+   */
   return Math.min(
     8000,
-    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '2400', 10) || 2400)
+    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '4000', 10) || 4000)
   );
 }
 

@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import { parseFeedUrl } from './feed';
 import { Resend } from 'resend';
-import { LOCAL_INTERSECTION_CENTER, pickLocalBusiness } from './local_businesses';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 function escapeHtml(s: string): string {
@@ -86,15 +85,18 @@ function buildSocialMediaCaption(): string {
   ];
   const tags = tagSets[v % tagSets.length];
 
-  const bodies: string[] = [
-    `Tech News Daily with Kyle · ${when}\n\nQuick bench rundown — what moved in tech, minus the doom-scroll. New drop every day.\n\n${tags}`,
-    `${when} · From the Linden Hills bench: your fast tech hit list. Follow for the next one.\n\n${tags}`,
-    `Daily tech briefing with Kyle (${when}). Stories that matter, straight talk, no filler.\n\n${tags}`,
-    `Bench report · ${when}. Tech news you can use before the day gets away from you.\n\n${tags}`,
-    `Kyle · Tech News Daily · ${when}\n\nShort, sharp, daily. Tap follow so you don’t miss tomorrow’s rundown.\n\n${tags}`,
-    `${when} — tech news from the shop. One take, real context.\n\n${tags}`,
+  /** Every post leads with this line (Threads / Reels / etc.). */
+  const headline = `Tech News Daily with Kyle · ${when}`;
+
+  const hooks = [
+    `Quick bench rundown — what moved in tech, minus the doom-scroll. New drop every day.`,
+    `From the Linden Hills bench: your fast tech hit list. Follow for the next one.`,
+    `Stories that matter, straight talk, no filler.`,
+    `Tech news you can use before the day gets away from you.`,
+    `Short, sharp, daily. Tap follow so you don’t miss tomorrow’s rundown.`,
+    `One take from the shop, real context.`,
   ];
-  return bodies[v % bodies.length];
+  return `${headline}\n\n${hooks[v % hooks.length]}\n\n${tags}`;
 }
 
 type Collected = {
@@ -291,25 +293,6 @@ async function writeAirLog(path: string, entries: AirLogEntry[]): Promise<void> 
   await writeFile(path, JSON.stringify(entries, null, 2), 'utf8');
 }
 
-function enforceLindenHillsPlug(
-  onAir: string,
-  localBizName: string,
-  localBizPitch: string
-): string {
-  const endLine = "BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.";
-  const hasBiz = normalizeText(onAir).includes(normalizeText(localBizName));
-  if (hasBiz) return onAir.trim();
-
-  const plugLine = `LINDEN HILLS SHOUT-OUT: CHECK OUT ${localBizName.toUpperCase()} NEAR 43RD AND UPTON. ${localBizPitch.toUpperCase()} GO CHECK THEM OUT.`;
-  const trimmed = onAir.trim();
-  if (!trimmed) return `${plugLine}\n${endLine}`;
-  if (trimmed.endsWith(endLine)) {
-    const body = trimmed.slice(0, -endLine.length).trimEnd();
-    return `${body}\n${plugLine}\n${endLine}`.trim();
-  }
-  return `${trimmed}\n${plugLine}\n${endLine}`.trim();
-}
-
 function reorderIndicesByScriptMention(
   indices: number[],
   collected: Collected[],
@@ -496,14 +479,6 @@ async function runNewsAgent() {
   const storyPickRule = `- Pick **3–6** total beats from **[TECH]**, **[HARDWARE]**, and **[SKATE]** numbered items **combined**. Lead with the strongest stories (software, AI, industry, security, platforms, etc.) and keep skate tight (one quick hitter if anything is truly good today).
 - **Hardware / devices** (phones, Macs, PCs, GPUs, wearables, accessories): include **only when** a **[HARDWARE]** item is **clearly new or newly newsworthy** — e.g. announcement, ship/preorder date, major spec drop, timely review wave, or a **fresh angle** on a product. **Do not** force a device beat every episode. **Do not** recycle the **same product** day after day when headlines are just rehashes or slow drip — skip and spend the time on better **[TECH]** stories instead.`;
 
-  const pickedBiz = pickLocalBusiness();
-  const localBizName =
-    process.env.LOCAL_BIZ_NAME?.trim() || pickedBiz.name;
-  const localBizPitch =
-    process.env.LOCAL_BIZ_PITCH?.trim() ||
-    `${pickedBiz.description} (${pickedBiz.category}).`;
-  const localBizNote = process.env.LOCAL_BIZ_NOTE?.trim() || '';
-
   const hasWolves = collected.some((c) => c.section === 'LOCAL');
 
   const segmentOrderBlock = hasWolves
@@ -511,15 +486,15 @@ async function runNewsAgent() {
 1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
 2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
 3) **THEN WOLVES** (Timberwolves — from **[LOCAL]** items: Canis Hoopus RSS plus official **NBA.com** Timberwolves index; only if the item is from the last 24 hours).
-4) **THEN LINDEN HILLS** neighborhood color: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) with a quick “go check them out” recommendation. Use this pitch line: **${localBizPitch}** Then add a small Linden Hills vibe note (Lake Harriet / morning shop energy). **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? `\n   - Extra note for the plug: ${localBizNote}` : ''}`
+4) **CLOSE** — move to soldering / deck; end with the required sign-off. Mention a local spot or neighborhood **only if it fits naturally** in your voice — **no** separate scripted shout-out or hard-sell plug (you already cover that when you want to).`
     : `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
 2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
-3) **THEN LINDEN HILLS** neighborhood color: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) with a quick “go check them out” recommendation. Use this pitch line: **${localBizPitch}** Then add a small Linden Hills vibe note (Lake Harriet / morning shop energy). **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? `\n   - Extra note for the plug: ${localBizNote}` : ''}`;
+3) **CLOSE** — move to soldering / deck; end with the required sign-off. Mention a local spot or neighborhood **only if it fits naturally** — **no** separate scripted shout-out block.`;
 
   const beatOrderPhrase = hasWolves
-    ? 'tech → skate → Wolves → Linden Hills'
-    : 'tech → skate → Linden Hills';
+    ? 'tech → skate → Wolves → close'
+    : 'tech → skate → close';
 
   const parityStories =
     'Decide your **3–5 covered stories** once. **Every** story you speak in ON_AIR must have a **matching** VIDEO_PROMPT beat';
@@ -538,8 +513,7 @@ ${storyPickRule}
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
 - **Wolves / LOCAL** stories come from **Canis Hoopus (RSS)** and the **official NBA.com Timberwolves news index** (same **[LOCAL]** list). Use the basketball beat **only if** the item is from the **last 24 hours**; if nothing qualifies, skip Wolves entirely.
 - Skateboarding: use **[SKATE]** sources for one quick, legit skate beat (premiere, SOTY/contest/news). Skip if nothing’s good.
-- **Linden Hills** — the shops, blocks, and neighborhood feel (near Lake Harriet, the usual haunts) — is **your on-camera color**, not something to pull from a city news feed.
-- For the Linden Hills close: plug **${localBizName}** (near ${LOCAL_INTERSECTION_CENTER}) and tell viewers to check them out. Use this pitch line: **${localBizPitch}** **Do not** say “I'M GRABBING A COFFEE.”${localBizNote ? ` Use this extra note: ${localBizNote}` : ''}
+- **No** second scripted local-business “shout-out” or mandatory plug — weave a shop or Linden Hills in **only if you already do** in your own wording.
 - Keep it tight for **about 60–120 seconds** read aloud (vertical single-take pace).
 - **Visuals are screenshot stills only** (one static grab per story in the edit). **Do not** promise a “full preview,” “full-screen walkthrough,” “we’ll pull that up later,” “live on screen,” or scrolling through the site on camera — you are **not** doing that. Refer to sources as “on the screenshot,” “in the grab,” or “headline on screen” if needed.
 
@@ -547,21 +521,9 @@ You are writing for a **small professional studio**: one column is the **video /
 
 ${segmentOrderBlock}
 
-**LOCKSTEP PARITY (VIDEO_PROMPT and ON_AIR must match 1:1):**
-- ${parityStories} (same company, product, headline topic, order). **No** extra beats in VIDEO_PROMPT for a story you do **not** say on air; **no** on-air beats that VIDEO_PROMPT does not cover.
-- Use the **same beat order** in both columns (${beatOrderPhrase}). If you use \`##\` headings in VIDEO_PROMPT, ON_AIR must follow that same sequence.
-- VIDEO_PROMPT is a **minimal vertical edit cheat sheet** for this VO — not a wish list. Do not add extra topics in either column that the other omits.
-
----
-
-**COLUMN A — VIDEO PROMPT (Markdown — minimal vertical / Final Cut):**
-Kyle’s workflow: **one vertical single take** (talking head), **template** with logo + ticker, **one numbered screenshot still per story** (files land in the linked folder in script order — blade the compound clip per beat). No browser demo, no “full preview” segment.
-
-- Output **short Markdown** only. Start with one line: \`# Vertical edit — [date]\` then **one \`##\` per story** you cover on air (same order as ON_AIR), e.g. \`## 1 — OpenAI\`, \`## Wolves — headline\`.
-- Under each \`##\`, use **2–4 bullets max**. Allowed labels (pick what applies): **CAM** (you on camera), **GFX** (logo / ticker / lower third already in template), **STILL** (screenshot for this beat — name the domain or headline so it matches the JPEG; grabs are **full article width** on purpose — **mask / position in the FCP compound clip** so headline + art fit the slide), **NOTE** (e.g. “head left when STILL is up” or “mask still to safe area”).
-- **Do not** use long shot lists, **B-ROLL** of scrolling sites, **SOT**, or a **~5-minute** / cinematic edit plan. Keep it **fast to scan** between teleprompter and timeline.
-- Mention **STILL** once per story that uses a source screenshot; align order with **<<<SOURCES>>>**.
-- This block is **not** read on camera — editor notes only.
+**LOCKSTEP + COLUMN A — VIDEO PROMPT:**
+- ${parityStories}. Same order as on air (${beatOrderPhrase}); nothing extra in either column.
+- **Short Markdown only** (editor notes — not read on camera): one \`#\` line, then one \`##\` per story. Under each: **2–3 bullets max** — mainly **STILL** (which grab / domain) and a **NOTE** if useful (e.g. head left, mask in compound). Skip long shot lists and B-roll plans.
 
 ---
 
@@ -576,7 +538,7 @@ Kyle’s workflow: **one vertical single take** (talking head), **template** wit
 **OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
 
 <<<VIDEO_PROMPT>>>
-(Minimal vertical Markdown: \`#\` + one \`##\` per story, short bullets **CAM** / **GFX** / **STILL** / **NOTE** only. Screenshots stills — no full-page preview beats. Same stories and order as ON_AIR. Segment order: ${beatOrderPhrase}.)
+(Brief Markdown: \`#\` + \`##\` per story, 2–3 bullets; match ON_AIR order, ${beatOrderPhrase}.)
 
 <<<ON_AIR>>>
 (ALL CAPS spoken script only — same stories and order as VIDEO_PROMPT above; no bracketed shot notes.)
@@ -670,7 +632,7 @@ Kyle’s workflow: **one vertical single take** (talking head), **template** wit
     collected.length
   );
 
-  const fixedOnAir = enforceLindenHillsPlug(finalScript, localBizName, localBizPitch);
+  const fixedOnAir = finalScript.trim();
   const orderedIndices = reorderIndicesByScriptMention(
     indices,
     collected,
