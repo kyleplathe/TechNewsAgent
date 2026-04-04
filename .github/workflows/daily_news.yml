@@ -5,8 +5,9 @@ name: Daily Tech News Agent
   push:
     branches: [main]
   schedule:
-    # UTC-only cron: 10:45 UTC = 5:45 AM Minneapolis during CDT (daylight). During CST (winter), use "45 11 * * *" for 5:45 AM local (10:45 UTC would be 4:45 AM then).
-    - cron: '45 10 * * *'
+    # GitHub cron is UTC only. 0 12 * * * ≈ 7:00 AM America/Chicago during CDT (Mar–early Nov).
+    # During CST (winter), same cron runs ≈ 6:00 AM local; use 0 13 * * * instead if you want ~7:00 AM CST (then ~8:00 AM CDT).
+    - cron: '0 12 * * *'
   workflow_dispatch: # Allows you to run it manually for testing
 
 permissions:
