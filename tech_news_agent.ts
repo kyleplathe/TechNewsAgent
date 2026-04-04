@@ -514,7 +514,7 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const storyPickRule = `- Pick **3–5** beats from **[TECH]** + **[HARDWARE]** + **[SKATE]** combined (often **3–4** is right for a **single-take ~60–120s** read). Lead with strongest **same-day / last-few-hours** energy; skate = one quick hitter only if it’s genuinely good today.
+  const storyPickRule = `- Pick **3–5** beats from **[TECH]** + **[HARDWARE]** + **[SKATE]** combined (often **3–4** is right for a **single-take ~85–100s** read — aim **~90s**). Lead with strongest **same-day / last-few-hours** energy; skate = one quick hitter only if it’s genuinely good today.
 - **Coverage mix:** software, AI/ML, hardware & gadgets, gaming (industry + games), dev tools, repair/maker — all fair game from the **[TECH]** + **[HARDWARE]** pool. **Hardware:** only when **[HARDWARE]** is clearly fresh / newsworthy; never force a device beat; don’t repeat the same product on slow news days.`;
 
   const hasWolves = collected.some((c) => c.section === 'LOCAL');
@@ -564,7 +564,7 @@ ${storyPickRule}
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
 - **Wolves / LOCAL** — **Canis Hoopus (RSS)** plus **NBA.com Timberwolves** index (same **[LOCAL]** list). Use the basketball beat **only** when the item is **fresh**; if nothing qualifies, **skip Wolves** entirely.
 - Skateboarding: use **[SKATE]** for one quick, legit beat (premiere, contest, real news). Skip if nothing’s good.
-- **One vertical take, ~60–120 seconds** read aloud — **few words**: no essay transitions (“building on that,” “wrapping up,” “let’s unpack”). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
+- **One vertical take, ~85–100 seconds** read aloud (target **~90s**) — **tight but not thin**: add **one concrete detail** on main beats when the headline gives you something real (a number, vendor, mechanism, “what they found”) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack”). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
 
 You are writing for a **small professional studio**: one column is the **video / post prompt** (for Final Cut), the other is **on-air copy** (teleprompter / VO only).
 
@@ -572,19 +572,19 @@ ${segmentOrderBlock}
 ${localColorBlock}
 
 **LOCKSTEP + COLUMN A — VIDEO PROMPT (source screenshots only):**
-- **Visuals:** You use **only** the **source screenshots** attached to the email (one JPEG per covered story). **Do not** call for stock footage, extra B-roll, additional stills you didn’t list, or “add clips.” Every visual is a **site grab** tied to a **story number** from the list above.
+- **Visuals:** You use **only** the **source screenshots** attached to the email (one JPEG per covered story). By default they are **full mobile viewport grabs** (phone-shaped frame: site chrome + headline + fold of the article — same idea as a normal screen recording still). **Do not** call for stock footage, extra B-roll, additional stills you didn’t list, or “add clips.” Every visual is a **site grab** tied to a **story number** from the list above.
 - ${parityStories}. Same order as on air (${beatOrderPhrase}); nothing extra in either column.
 - **Short Markdown only** (editor notes — **not** read on camera): one \`#\` show title line, one \`##\` per **news** story (heading = story headline), then \`## Close\` for **Linden Hills + soldering sign-off** (no matching story number in <<<SOURCES>>>).
 - Under each **news** \`##\`: **2 bullets max**:
   - **SCREENSHOT** — name the **story number** (e.g. “**Story 3** from today’s list — first slide / first grab in email order”).
-  - **NOTE** — one optional edit note (transition, lower third, slide order).
-- **Close** section: **NOTE** bullets only (no fake SCREENSHOT).
-- **Forbidden in this column:** **B-ROLL**, **STOCK**, **CAM** (live camera), “film B-roll,” or any note that implies media beyond the email JPEGs.
+  - **NOTE** — optional **in-timeline hint on this still only**: rough **hold length**, **hard cut** vs short **dissolve** to the **next email screenshot**, or **plain text** you type in the editor **on top of this JPEG** (title safe). **Do not** write notes that imply **any other media** — no B-roll, stock, extra stills, screen caps you didn’t attach, second angles, “film cutaways,” or “add shots.” Slides = **these JPEGs only**.
+- **Close** section: **NOTE** bullets only (no fake SCREENSHOT) — e.g. stay on last story still through sign-off, or fade out; still **no** new footage assets.
+- **Forbidden in this column:** **B-ROLL**, **STOCK**, **CAM** (extra camera clips), “film B-roll,” “lower third pack,” “insert clip,” or any wording that implies files beyond the **attached screenshots** (text you type in the timeline is OK).
 
 ---
 
 **COLUMN B — ON AIR (teleprompter / voiceover — spoken words only):**
-- **ALL CAPS.** **Minimum word count** — each story is **1–3 short lines** (headline essence + one “why it matters” line max). No paragraphs, no recap of the whole web.
+- **ALL CAPS.** Each story is **2–4 short lines** max: headline essence + **why it matters** + **one concrete detail** when the source headline supports it (stat, layer, product name — **skip** the detail if it forces wordiness). No long paragraphs, no recap of the whole web.
 - **Single continuous take** — write so it flows straight through after the open; no “first story / next up / finally” padding.
 - **Do not** put [B-ROLL] or shot notes here — VIDEO PROMPT only.
 - START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
@@ -597,10 +597,10 @@ ${localColorBlock}
 **OUTPUT FORMAT (exactly four blocks, in this order — use these marker lines literally):**
 
 <<<VIDEO_PROMPT>>>
-(Markdown: \`#\` + \`##\` per story + \`## Close\`; **SCREENSHOT** bullets only; match ON_AIR order, ${beatOrderPhrase}.)
+(Markdown: \`#\` + \`##\` per story + \`## Close\`; each news \`##\` has **SCREENSHOT** + optional **NOTE** [timeline/text-on-still only, **no** extra B-roll or clips]; match ON_AIR order, ${beatOrderPhrase}.)
 
 <<<ON_AIR>>>
-(ALL CAPS — **lean** script, one take, ~60–120s; same story order as VIDEO_PROMPT.)
+(ALL CAPS — one take, **~85–100s** (~**90s**); same story order as VIDEO_PROMPT.)
 
 <<<SOURCES>>>
 (Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** at the top — e.g. \`2,5,7\` = story **2**, then **5**, then **7**. **Order = slide order** = order of JPEGs in the email: first number = first slide / first grab.)
@@ -805,11 +805,11 @@ ${localColorBlock}
         contentType: 'image/jpeg',
       }));
       const names = kept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS — ${kept.length} JPEG: ${names}\nContent-region crop from headline downward (max height SCREENSHOT_MAX_CONTENT_HEIGHT; ~393px-wide column on mobile). Order matches <<<SOURCES>>>. See AGENTS.md.\n`;
+      screenshotBannerText = `\nSOURCE SCREENSHOTS — ${kept.length} JPEG: ${names}\nDefault: **viewport** = full mobile frame (~393×852 CSS px at DPR 1 unless SCREENSHOT_WIDTH/HEIGHT set). Use SCREENSHOT_MODE=content for article-only crop. Order matches <<<SOURCES>>>. See AGENTS.md.\n`;
       screenshotBannerHtml =
         `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
         `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
-          `${kept.length} JPEG(s) — ${names}. Article strip (headline + top of story); order matches SOURCES line. Paywalls/bots may yield partial pages.`
+          `${kept.length} JPEG(s) — ${names}. Default full mobile viewport (phone-shaped grab); order matches SOURCES. Paywalls/bots may yield partial pages.`
         )}</p>`;
     }
     if (shotFails.length) {

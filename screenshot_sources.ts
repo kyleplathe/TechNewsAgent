@@ -73,9 +73,13 @@ function fullPage(): boolean {
   return v === '1' || v === 'true' || v === 'yes';
 }
 
-/** viewport = old behavior; content = crop to article/main (less empty margin); fullpage = whole scrollable document. */
+/**
+ * Default **viewport** = one mobile **full frame** (393×852 CSS px with default width/height) —
+ * matches a normal phone screenshot (nav + headline + body fold), consistent JPEG size.
+ * `content` = crop to article/main up to `SCREENSHOT_MAX_CONTENT_HEIGHT`. `fullpage` = whole document.
+ */
 function screenshotMode(): 'viewport' | 'content' | 'fullpage' {
-  const m = (process.env.SCREENSHOT_MODE ?? 'content').trim().toLowerCase();
+  const m = (process.env.SCREENSHOT_MODE ?? 'viewport').trim().toLowerCase();
   if (m === 'viewport') return 'viewport';
   if (m === 'fullpage' || m === 'full_page') return 'fullpage';
   return 'content';
@@ -83,12 +87,11 @@ function screenshotMode(): 'viewport' | 'content' | 'fullpage' {
 
 function maxContentHeightPx(): number {
   /**
-   * Max height of the **content-region** crop (CSS px): from trimmed headline downward through
-   * lede / hero — not the full article. Tweak for slides (title + image visible without tight union crops).
+   * Used only when `SCREENSHOT_MODE=content`: max height (CSS px) from trimmed headline downward.
    */
   return Math.min(
     8000,
-    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '2200', 10) || 2200)
+    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '2400', 10) || 2400)
   );
 }
 

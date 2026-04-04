@@ -33,8 +33,13 @@ If the email looks truncated or missing a column, check Gemini `maxOutputTokens`
 
 ## Screenshots (`screenshot_sources.ts`)
 
-- Default: **mobile** viewport (~393×852 CSS px), **content** mode — **article/main crop** from the headline downward (gap trim above `h1` when helpful), height capped by `SCREENSHOT_MAX_CONTENT_HEIGHT` (default **2200** CSS px). Good for **title + hero/lede** on slides without the experimental tight union.
-- Optional tight **h1 + hero image** union: `SCREENSHOT_HEADLINE_IMAGE_ONLY=1`. Disable screenshots: `SCREENSHOT_SOURCES=0`.
+- Default **`SCREENSHOT_MODE=viewport`**: one **full mobile frame** per URL (~**393×852** CSS px with default `SCREENSHOT_MOBILE` — same shape as a normal phone screenshot: chrome + headline + first scroll fold). Consistent size for slides.
+- **`SCREENSHOT_MODE=content`**: crop to article/main from the headline down, max height `SCREENSHOT_MAX_CONTENT_HEIGHT` (default **2400** CSS px); optional `SCREENSHOT_HEADLINE_IMAGE_ONLY=1` for tight h1+hero union.
+- Disable screenshots: `SCREENSHOT_SOURCES=0`.
+
+## Voiceover length (~90s desk)
+
+Target **one take ~85–100s** (~**90s**). Best practice for a **daily reporter**: **one beat → one point → one proof** (headline + why it matters + a single concrete detail — number, name, mechanism — when the story gives it). Skip beats that need a paragraph; skip essay transitions. Close stays short (neighborhood + sign-off).
 
 ## CI schedule
 
