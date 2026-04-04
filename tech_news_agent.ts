@@ -81,8 +81,10 @@ function buildSocialMediaCaption(): string {
 
   const tagSets = [
     '#TechNews #TechNewsDaily #Technology #TechTok #DailyTechNews',
-    '#TechNews #Minneapolis #LindenHills #TechTok #DailyTechNews',
-    '#TechNewsDaily #Technology #Apple #TechTok #News',
+    '#TechNews #Minneapolis #LindenHills #TechTok #Skateboarding',
+    '#TechNewsDaily #Technology #Apple #AI #Gaming',
+    '#TechNews #Timberwolves #Minneapolis #TechTok #DailyTechNews',
+    '#TechNewsDaily #Developer #Hardware #TechTok',
   ];
   const tags = tagSets[v % tagSets.length];
 
@@ -90,12 +92,10 @@ function buildSocialMediaCaption(): string {
   const headline = `Tech News Daily with Kyle · ${when}`;
 
   const hooks = [
-    `Quick bench rundown — what moved in tech, minus the doom-scroll. New drop every day.`,
-    `From the Linden Hills bench: your fast tech hit list. Follow for the next one.`,
-    `Stories that matter, straight talk, no filler.`,
-    `Tech news you can use before the day gets away from you.`,
-    `Short, sharp, daily. Tap follow so you don’t miss tomorrow’s rundown.`,
-    `One take from the shop, real context.`,
+    `Today’s tech desk — software, hardware, AI, games, and the bench. One take, no filler.`,
+    `Fresh tech + Wolves when it matters + a skate hit when it’s real. Follow for tomorrow’s run.`,
+    `Bitcoin-only when digital money comes up — no altcoin noise. Daily from Linden Hills.`,
+    `Short rundown for vertical: grab the screenshots, hit record, post.`,
   ];
   return `${headline}\n\n${hooks[v % hooks.length]}\n\n${tags}`;
 }
@@ -226,12 +226,15 @@ function parseDateSafe(v: string): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
-/** Default windows; tighten with MAX_STORY_AGE_HOURS_TECH=12 (etc.) in `.env`. */
+/**
+ * Default freshness (hours). Tech is tight so you are not voicing yesterday’s cycle; override per
+ * section with MAX_STORY_AGE_HOURS_TECH, _HARDWARE, _SKATE, _LOCAL in `.env`.
+ */
 const DEFAULT_MAX_STORY_AGE_HOURS: Record<Collected['section'], number> = {
   LOCAL: 24,
-  SKATE: 48,
-  TECH: 48,
-  HARDWARE: 72,
+  SKATE: 24,
+  TECH: 12,
+  HARDWARE: 24,
 };
 
 function maxStoryAgeMsForSection(section: Collected['section']): number {
@@ -247,13 +250,16 @@ function maxStoryAgeMsForSection(section: Collected['section']): number {
   return hours * 60 * 60 * 1000;
 }
 
+function allowUndatedFeedItems(): boolean {
+  return process.env.ALLOW_UNDATED_FEED_ITEMS?.trim() === '1';
+}
+
 function isFreshForSection(item: Collected): boolean {
   const d = parseDateSafe(item.date);
-  if (!d && item.section === 'LOCAL') {
-    // For Wolves, require a parseable date so stale undated items do not slip through.
+  if (!d) {
+    if (allowUndatedFeedItems()) return true;
     return false;
   }
-  if (!d) return true;
   const ageMs = Date.now() - d.getTime();
   const maxAgeMs = maxStoryAgeMsForSection(item.section);
   return ageMs <= maxAgeMs;
@@ -326,13 +332,21 @@ async function runNewsAgent() {
     Math.max(1, parseInt(process.env.FEED_ITEM_LIMIT ?? '4', 10) || 4)
   );
 
-  /** Curated set — fewer feeds tends to match the “early scripts” quality. Add/remove URLs here. */
+  /**
+   * Tech = software, platforms, AI, security (when tech), gaming news, dev ecosystem, repair/maker
+   * culture — **not** altcoins (Bitcoin-only rule applies on headlines). Add/remove URLs here.
+   */
   const techFeeds = [
     'https://news.ycombinator.com/rss',
     'https://feeds.arstechnica.com/arstechnica/index',
     'https://www.theverge.com/rss/index.xml',
+    'https://techcrunch.com/feed/',
+    'https://www.polygon.com/rss/index.xml/',
+    'https://www.engadget.com/rss.xml',
+    'https://www.gamesindustry.biz/feed',
+    'https://hackaday.com/blog/feed/',
   ];
-  /** Hardware / devices — mixed into tech beats when news is fresh (not a forced daily slot). */
+  /** Hardware / devices / silicon — fold into the tech block on air when the story earns it. */
   const hardwareFeeds = [
     'https://www.apple.com/newsroom/rss-feed.rss',
     'https://9to5mac.com/feed/',
@@ -440,7 +454,7 @@ async function runNewsAgent() {
 
   if (!collected.length) {
     throw new Error(
-      'All candidate stories were filtered out by freshness, Bitcoin-only currency rule, or repeat rules. Try adjusting MAX_STORY_AGE_HOURS_* , BITCOIN_ONLY_CURRENCY_RULE=0, or STORY_REPEAT_COOLDOWN_DAYS.'
+      'All candidate stories were filtered out by freshness, Bitcoin-only currency rule, undated items (set ALLOW_UNDATED_FEED_ITEMS=1 only if a feed omits dates), or repeat rules. Try MAX_STORY_AGE_HOURS_* , BITCOIN_ONLY_CURRENCY_RULE=0, or STORY_REPEAT_COOLDOWN_DAYS.'
     );
   }
 
@@ -477,8 +491,8 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const storyPickRule = `- Pick **3–5** beats from **[TECH]** + **[HARDWARE]** + **[SKATE]** combined (often **3–4** is right for a **single-take ~60–120s** read). Lead with strongest stories; skate = one quick hitter only if it’s genuinely good today.
-- **Hardware:** only when **[HARDWARE]** is clearly new / newsworthy; never force a device beat; don’t repeat the same product on slow news days.`;
+  const storyPickRule = `- Pick **3–5** beats from **[TECH]** + **[HARDWARE]** + **[SKATE]** combined (often **3–4** is right for a **single-take ~60–120s** read). Lead with strongest **same-day / last-few-hours** energy; skate = one quick hitter only if it’s genuinely good today.
+- **Coverage mix:** software, AI/ML, hardware & gadgets, gaming (industry + games), dev tools, repair/maker — all fair game from the **[TECH]** + **[HARDWARE]** pool. **Hardware:** only when **[HARDWARE]** is clearly fresh / newsworthy; never force a device beat; don’t repeat the same product on slow news days.`;
 
   const hasWolves = collected.some((c) => c.section === 'LOCAL');
 
@@ -499,7 +513,7 @@ async function runNewsAgent() {
     ? `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
 2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
-3) **THEN WOLVES** (Timberwolves — from **[LOCAL]** items: Canis Hoopus RSS plus official **NBA.com** Timberwolves index; only if the item is from the last 24 hours).
+3) **THEN WOLVES** (Timberwolves — from **[LOCAL]** items: Canis Hoopus RSS plus official **NBA.com** Timberwolves news index; only if the item passes the freshness filter).
 4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`
     : `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
@@ -521,12 +535,12 @@ ${storyListText}
 
 QUALITY RULES:
 ${storyPickRule}
-- If a headline includes a year like "(2024)", that is usually the article’s original date, not “breaking today.” Say “making the rounds” or “people are digging into…” unless it’s clearly new.
+- **Recency (critical):** The list is **pre-filtered** for freshness (tech ~**12h**, hardware/skate/local ~**24h** by default). Treat everything as **today’s desk** — not “yesterday” or “overnight” unless the item’s date is clearly **today** in US **Central**. Skip stale vibes, republished “classics,” and year-stamped reruns unless the headline proves it’s **new today**. If a headline includes “(2024)” or an old year, it is usually **not** breaking — either skip or frame as “making the rounds again,” not fresh news.
 - Do not invent products, prices, or dates. Stay close to the headlines.
 - **Digital money / chains:** The show is **Bitcoin-only**. Do **not** cover altcoins, stablecoins, NFT/DeFi/Web3 industry, or generic **“crypto”** as an asset class. **Do** cover **Bitcoin** when a sourced headline is clearly about Bitcoin (ETFs, adoption, mining, Lightning, regulation aimed at Bitcoin, etc.). On air, avoid saying **“crypto”** as a bucket — say **Bitcoin** or neutral tech wording.
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
-- **Wolves / LOCAL** stories come from **Canis Hoopus (RSS)** and the **official NBA.com Timberwolves news index** (same **[LOCAL]** list). Use the basketball beat **only if** the item is from the **last 24 hours**; if nothing qualifies, skip Wolves entirely.
-- Skateboarding: use **[SKATE]** sources for one quick, legit skate beat (premiere, SOTY/contest/news). Skip if nothing’s good.
+- **Wolves / LOCAL** — **Canis Hoopus (RSS)** plus **NBA.com Timberwolves** index (same **[LOCAL]** list). Use the basketball beat **only** when the item is **fresh**; if nothing qualifies, **skip Wolves** entirely.
+- Skateboarding: use **[SKATE]** for one quick, legit beat (premiere, contest, real news). Skip if nothing’s good.
 - **One vertical take, ~60–120 seconds** read aloud — **few words**: no essay transitions (“building on that,” “wrapping up,” “let’s unpack”). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
 
 You are writing for a **small professional studio**: one column is the **video / post prompt** (for Final Cut), the other is **on-air copy** (teleprompter / VO only).
@@ -572,7 +586,7 @@ ${localColorBlock}
 
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 2200 },
+    generationConfig: { maxOutputTokens: 4096 },
   });
 
   type GeminiResponse = {
@@ -750,11 +764,11 @@ ${localColorBlock}
         contentType: 'image/jpeg',
       }));
       const names = kept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nCapture: default **mobile / iPhone-width** viewport (393×852 unless SCREENSHOT_WIDTH/HEIGHT set; SCREENSHOT_MOBILE=0 for desktop layout). SCREENSHOT_MODE=${process.env.SCREENSHOT_MODE ?? 'content'}; content crop defaults to **headline + hero image** (SCREENSHOT_HEADLINE_IMAGE_ONLY=0 for a taller strip from the title). Cap SCREENSHOT_MAX_CONTENT_HEIGHT; optional width caps SCREENSHOT_MAX_CONTENT_WIDTH*. JPEG SCREENSHOT_JPEG_QUALITY; DPR SCREENSHOT_DEVICE_SCALE_FACTOR. SCREENSHOT_FULL_PAGE=1 = full scroll. Failed or skipped URLs below if any.\n`;
+      screenshotBannerText = `\nSOURCE SCREENSHOTS — ${kept.length} JPEG: ${names}\nHeadline + hero crop; width ~article column (often ~393 CSS px at DPR 1); height varies by page. See repo AGENTS.md for env toggles.\n`;
       screenshotBannerHtml =
         `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
         `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
-          `${kept.length} JPEG(s) attached (${names}). Default crop is headline + hero image inside the article/main region; paywalls / bot blocking may produce partial or error pages.`
+          `${kept.length} JPEG(s) — ${names}. Headline + hero only; dimensions vary (scale to fit in your compound clip). Paywalls/bots may yield partial pages.`
         )}</p>`;
     }
     if (shotFails.length) {

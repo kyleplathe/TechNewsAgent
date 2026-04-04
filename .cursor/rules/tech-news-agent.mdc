@@ -1,0 +1,14 @@
+---
+description: TechNewsAgent RSS+Gemini+Resend pipeline, feeds, freshness, Bitcoin-only, screenshots
+globs: "**/*.{ts,yml}"
+alwaysApply: false
+---
+
+# TechNewsAgent
+
+- **Main entry:** `tech_news_agent.ts` — feeds → Gemini (`<<<VIDEO_PROMPT>>>`, `<<<ON_AIR>>>`, `<<<SOURCES>>>`) → Resend email; optional Playwright shots in `screenshot_sources.ts`.
+- **Scope:** Broad tech (software, AI, hardware, gaming, dev, repair/maker); **Timberwolves** + **skate** as ordered segments; **Linden Hills** close; **Bitcoin-only** for digital money (no altcoin industry). Logic in `passesBitcoinOnlyCurrencyRule` and the Gemini prompt string.
+- **Freshness:** Defaults in `DEFAULT_MAX_STORY_AGE_HOURS`; override with `MAX_STORY_AGE_HOURS_TECH` (etc.). Undated feed items are rejected unless `ALLOW_UNDATED_FEED_ITEMS=1`.
+- **Feeds:** Arrays `techFeeds` / `hardwareFeeds` / `skateFeeds` / `localFeeds` in `tech_news_agent.ts`; NBA supplement `nba_wolves_news.ts`.
+- **Screenshots:** Headline + hero crop by default; sizes vary; do not assume fixed 9:16 JPEG output unless you add post-processing.
+- **Docs:** See root `AGENTS.md` for full maintainer summary.
