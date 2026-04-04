@@ -83,12 +83,12 @@ function screenshotMode(): 'viewport' | 'content' | 'fullpage' {
 
 function maxContentHeightPx(): number {
   /**
-   * Vertical extent of the **content crop** — a bit extra below the fold so you can nudge a
-   * shape mask in FCP, not a giant scroll. Width follows **viewport** (iPhone-narrow by default).
+   * Safety cap on crop height (CSS px). With headline+hero mode (default), the crop is usually
+   * much shorter; this still limits absurdly tall heroes. Raise for more vertical slack in FCP.
    */
   return Math.min(
     8000,
-    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '2400', 10) || 2400)
+    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '1400', 10) || 1400)
   );
 }
 
@@ -230,6 +230,132 @@ function trimHeadlineGapEnabled(): boolean {
 }
 
 /**
+ * Default on: crop to **title + hero image** (largest qualifying `img` near the `h1`), not the
+ * article body. Set `SCREENSHOT_HEADLINE_IMAGE_ONLY=0` for a taller strip from the headline
+ * downward (up to `SCREENSHOT_MAX_CONTENT_HEIGHT`).
+ */
+function headlineImageOnlyEnabled(): boolean {
+  const v = process.env.SCREENSHOT_HEADLINE_IMAGE_ONLY?.trim().toLowerCase();
+  if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+  return true;
+}
+
+function headlineHeroPadPx(): number {
+  return Math.min(
+    48,
+    Math.max(0, parseInt(process.env.SCREENSHOT_HEADLINE_HERO_PAD_PX ?? '12', 10) || 12)
+  );
+}
+
+function minHeroImageSize(): { w: number; h: number } {
+  const w = Math.min(
+    800,
+    Math.max(80, parseInt(process.env.SCREENSHOT_MIN_HERO_IMG_WIDTH ?? '140', 10) || 140)
+  );
+  const h = Math.min(
+    600,
+    Math.max(48, parseInt(process.env.SCREENSHOT_MIN_HERO_IMG_HEIGHT ?? '100', 10) || 100)
+  );
+  return { w, h };
+}
+
+type ClipRect = { x: number; y: number; width: number; height: number };
+
+function intersectClipWithArticleBox(inner: ClipRect, article: ClipRect): ClipRect | null {
+  const left = Math.max(inner.x, article.x);
+  const top = Math.max(inner.y, article.y);
+  const right = Math.min(inner.x + inner.width, article.x + article.width);
+  const bottom = Math.min(inner.y + inner.height, article.y + article.height);
+  if (right <= left || bottom <= top) return null;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/**
+ * Union of `h1` and the largest in-band hero `img` inside the content root (page coordinates).
+ * Falls back to headline-only (tight) when no image qualifies.
+ */
+async function clipHeadlineAndHeroImage(
+  loc: Locator,
+  articleBox: ClipRect,
+  maxH: number
+): Promise<ClipRect | null> {
+  const pad = headlineHeroPadPx();
+  const { w: minImgW, h: minImgH } = minHeroImageSize();
+
+  const raw = await loc
+    .evaluate(
+      (el, { maxHPx, padPx, minImgWPx, minImgHPx }) => {
+        const root = el as HTMLElement;
+        const sx = window.scrollX;
+        const sy = window.scrollY;
+        const abs = (r: DOMRect) => ({
+          left: r.left + sx,
+          top: r.top + sy,
+          right: r.right + sx,
+          bottom: r.bottom + sy,
+          width: r.width,
+          height: r.height,
+        });
+
+        const h1 = root.querySelector('h1');
+        if (!h1) return null;
+        const hr = abs(h1.getBoundingClientRect());
+        if (hr.width < 4 || hr.height < 4) return null;
+
+        let left = hr.left - padPx;
+        let top = hr.top - padPx;
+        let right = hr.right + padPx;
+        let bottom = hr.bottom + padPx;
+
+        const bandTop = hr.top - 420;
+        const bandBot = hr.bottom + 2000;
+
+        const imgs = root.querySelectorAll('img');
+        let best: ReturnType<typeof abs> | null = null;
+        let bestArea = 0;
+        for (const img of imgs) {
+          if (!(img instanceof HTMLImageElement)) continue;
+          const r = img.getBoundingClientRect();
+          if (r.width < minImgWPx || r.height < minImgHPx) continue;
+          const ir = abs(r);
+          if (ir.bottom < bandTop || ir.top > bandBot) continue;
+          const area = ir.width * ir.height;
+          if (area > bestArea) {
+            bestArea = area;
+            best = ir;
+          }
+        }
+        if (best) {
+          left = Math.min(left, best.left - padPx);
+          top = Math.min(top, best.top - padPx);
+          right = Math.max(right, best.right + padPx);
+          bottom = Math.max(bottom, best.bottom + padPx);
+        }
+
+        const w = Math.max(1, right - left);
+        let h = Math.max(1, bottom - top);
+        if (h > maxHPx) h = maxHPx;
+        return { x: left, y: top, width: w, height: h };
+      },
+      { maxHPx: maxH, padPx: pad, minImgWPx: minImgW, minImgHPx: minImgH }
+    )
+    .catch(() => null);
+
+  if (!raw || raw.width < 40 || raw.height < 40) return null;
+
+  const inter = intersectClipWithArticleBox(raw, articleBox);
+  if (!inter || inter.height < 48) return null;
+
+  const cappedH = Math.min(inter.height, maxH);
+  return {
+    x: inter.x,
+    y: inter.y,
+    width: inter.width,
+    height: cappedH,
+  };
+}
+
+/**
  * Many news pages stack nav + trending + empty ad slots above the real headline inside the
  * same `main`/`article` box. Cropping from the first `h1` drops that dead space so the hero
  * image fits better in 9:16 PiP.
@@ -349,8 +475,8 @@ async function primeLazyMedia(page: Page): Promise<void> {
 }
 
 /**
- * Prefer a tight crop on the story column (headline + lede) instead of the full viewport or
- * an endless full-page scroll — both common sources of “huge white space” in vertical edits.
+ * Prefer a tight crop on the story column: by default **headline + hero image** only; otherwise
+ * headline-led strip up to `SCREENSHOT_MAX_CONTENT_HEIGHT` — not full viewport or endless scroll.
  */
 async function captureScreenshot(page: Page): Promise<Buffer> {
   const jq = jpegQuality();
@@ -400,7 +526,13 @@ async function captureScreenshot(page: Page): Promise<Buffer> {
       const box = await loc.boundingBox();
       if (!box || box.width < minContentWidth || box.height < 80) continue;
 
-      let clip = await clipForContentRegion(loc, box, maxH);
+      let clip: ClipRect;
+      if (headlineImageOnlyEnabled()) {
+        const heroClip = await clipHeadlineAndHeroImage(loc, box, maxH);
+        clip = heroClip ?? (await clipForContentRegion(loc, box, maxH));
+      } else {
+        clip = await clipForContentRegion(loc, box, maxH);
+      }
       clip = applyMaxWidthToClip(clip, maxContentWidthForHost(host));
       // fullPage so `clip` can reach content above/below the initial viewport.
       return Buffer.from(

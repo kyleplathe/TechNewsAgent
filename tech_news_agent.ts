@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { parseFeedUrl } from './feed';
 import { Resend } from 'resend';
+import { LOCAL_INTERSECTION_CENTER, pickLocalBusiness } from './local_businesses';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 function escapeHtml(s: string): string {
@@ -481,16 +482,29 @@ async function runNewsAgent() {
 
   const hasWolves = collected.some((c) => c.section === 'LOCAL');
 
+  const pickedBiz = pickLocalBusiness();
+  const localBizName =
+    process.env.LOCAL_BIZ_NAME?.trim() || pickedBiz.name;
+  const localBizPitch =
+    process.env.LOCAL_BIZ_PITCH?.trim() ||
+    `${pickedBiz.description} (${pickedBiz.category}).`;
+  const localBizNote = process.env.LOCAL_BIZ_NOTE?.trim() || '';
+
+  const localColorBlock = `
+**LINDEN HILLS / NEIGHBORHOOD (before the final sign-off — keep it organic):**
+- **1–2 short lines** of local color near **${LOCAL_INTERSECTION_CENTER}** (Lake Harriet, morning-on-the-block energy, etc.).
+- You may **naturally mention** **${localBizName}** in passing — ${localBizPitch} — like you’re talking on the bench, **not** a standalone shout-out segment and **not** hard-sell / “GO CHECK THEM OUT” phrasing.${localBizNote ? `\n- Extra note: ${localBizNote}` : ''}`;
+
   const segmentOrderBlock = hasWolves
     ? `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
 2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
 3) **THEN WOLVES** (Timberwolves — from **[LOCAL]** items: Canis Hoopus RSS plus official **NBA.com** Timberwolves index; only if the item is from the last 24 hours).
-4) **CLOSE** — move to soldering / deck; end with the required sign-off. Mention a local spot or neighborhood **only if it fits naturally** in your voice — **no** separate scripted shout-out or hard-sell plug (you already cover that when you want to).`
+4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`
     : `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
 2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
-3) **CLOSE** — move to soldering / deck; end with the required sign-off. Mention a local spot or neighborhood **only if it fits naturally** — **no** separate scripted shout-out block.`;
+3) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`;
 
   const beatOrderPhrase = hasWolves
     ? 'tech → skate → Wolves → close'
@@ -513,16 +527,16 @@ ${storyPickRule}
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
 - **Wolves / LOCAL** stories come from **Canis Hoopus (RSS)** and the **official NBA.com Timberwolves news index** (same **[LOCAL]** list). Use the basketball beat **only if** the item is from the **last 24 hours**; if nothing qualifies, skip Wolves entirely.
 - Skateboarding: use **[SKATE]** sources for one quick, legit skate beat (premiere, SOTY/contest/news). Skip if nothing’s good.
-- **No** second scripted local-business “shout-out” — mention a shop or Linden Hills **only if you already do**, naturally.
-- **One vertical take, ~60–120 seconds** read aloud at your pace — that target is still the show; nothing changed except **use fewer words**: no essay transitions (“building on that,” “wrapping up,” “let’s unpack”). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
+- **One vertical take, ~60–120 seconds** read aloud — **few words**: no essay transitions (“building on that,” “wrapping up,” “let’s unpack”). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
 
 You are writing for a **small professional studio**: one column is the **video / post prompt** (for Final Cut), the other is **on-air copy** (teleprompter / VO only).
 
 ${segmentOrderBlock}
+${localColorBlock}
 
 **LOCKSTEP + COLUMN A — VIDEO PROMPT:**
 - ${parityStories}. Same order as on air (${beatOrderPhrase}); nothing extra in either column.
-- **Short Markdown only** (editor notes — not read on camera): one \`#\` line, then one \`##\` per story. Under each: **2–3 bullets max** — mainly **STILL** (which grab / domain) and a **NOTE** if useful (e.g. head left, mask in compound). Skip long shot lists and B-roll plans.
+- **Short Markdown only** (editor notes — not read on camera): one \`#\` line, one \`##\` per **news** story, then \`## Close\` for **Linden Hills / neighborhood + soldering sign-off** (no matching SOURCE number). Under each: **2–3 bullets max** — **STILL** / **NOTE** for stories with grabs; **Close** = **CAM** / **NOTE** only.
 
 ---
 
@@ -736,11 +750,11 @@ ${segmentOrderBlock}
         contentType: 'image/jpeg',
       }));
       const names = kept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nCapture: default **mobile / iPhone-width** viewport (393×852 unless SCREENSHOT_WIDTH/HEIGHT set; SCREENSHOT_MOBILE=0 for desktop layout). SCREENSHOT_MODE=${process.env.SCREENSHOT_MODE ?? 'content'}, max crop height SCREENSHOT_MAX_CONTENT_HEIGHT, optional width caps SCREENSHOT_MAX_CONTENT_WIDTH*. JPEG SCREENSHOT_JPEG_QUALITY; DPR SCREENSHOT_DEVICE_SCALE_FACTOR. SCREENSHOT_FULL_PAGE=1 = full scroll. Failed or skipped URLs below if any.\n`;
+      screenshotBannerText = `\nSOURCE SCREENSHOTS (JPEG attachments — ${kept.length} file(s): ${names})\nCapture: default **mobile / iPhone-width** viewport (393×852 unless SCREENSHOT_WIDTH/HEIGHT set; SCREENSHOT_MOBILE=0 for desktop layout). SCREENSHOT_MODE=${process.env.SCREENSHOT_MODE ?? 'content'}; content crop defaults to **headline + hero image** (SCREENSHOT_HEADLINE_IMAGE_ONLY=0 for a taller strip from the title). Cap SCREENSHOT_MAX_CONTENT_HEIGHT; optional width caps SCREENSHOT_MAX_CONTENT_WIDTH*. JPEG SCREENSHOT_JPEG_QUALITY; DPR SCREENSHOT_DEVICE_SCALE_FACTOR. SCREENSHOT_FULL_PAGE=1 = full scroll. Failed or skipped URLs below if any.\n`;
       screenshotBannerHtml =
         `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
         `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
-          `${kept.length} JPEG(s) attached (${names}). Default is a content-region crop (article/main) to cut empty margins; paywalls / bot blocking may produce partial or error pages.`
+          `${kept.length} JPEG(s) attached (${names}). Default crop is headline + hero image inside the article/main region; paywalls / bot blocking may produce partial or error pages.`
         )}</p>`;
     }
     if (shotFails.length) {
