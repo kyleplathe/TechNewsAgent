@@ -27,14 +27,14 @@ Items **without a parseable `pubDate` / Atom date** are **dropped** unless `ALLO
 
 Order: **Ticker** → **VIDEO PROMPT** (Markdown) → **ON AIR** (ALL CAPS) → **SOCIAL** caption → **SOURCE LINKS** → screenshot note + attachments.
 
-Markers in model output: `<<<VIDEO_PROMPT>>>`, `<<<ON_AIR>>>`, `<<<SOURCES>>>` plus one line of comma-separated 1-based indices.
+Markers in model output: `<<<VIDEO_PROMPT>>>`, `<<<ON_AIR>>>`, `<<<SOURCES>>>` (one line of comma-separated 1-based story numbers = same numbers as the **numbered list** in the prompt = **slide / JPEG order**), then `<<<SOCIAL>>>` (short Threads-style body; the script prepends the title line and hashtags).
 
-If the email looks truncated or missing a column, check Gemini `maxOutputTokens` and API errors; `<<<SOURCES>>>` must be exact.
+If the email looks truncated or missing a column, check Gemini `maxOutputTokens` and API errors; markers must be exact.
 
 ## Screenshots (`screenshot_sources.ts`)
 
-- Default: **mobile** viewport (~393×852 CSS px), **content** mode, **headline + hero image** union (not full article). JPEG dimensions **vary** by page; width is usually column-width, height is intrinsic up to `SCREENSHOT_MAX_CONTENT_HEIGHT`.
-- Disable hero-only crop: `SCREENSHOT_HEADLINE_IMAGE_ONLY=0`. Disable screenshots: `SCREENSHOT_SOURCES=0`.
+- Default: **mobile** viewport (~393×852 CSS px), **content** mode — **article/main crop** from the headline downward (gap trim above `h1` when helpful), height capped by `SCREENSHOT_MAX_CONTENT_HEIGHT` (default **2200** CSS px). Good for **title + hero/lede** on slides without the experimental tight union.
+- Optional tight **h1 + hero image** union: `SCREENSHOT_HEADLINE_IMAGE_ONLY=1`. Disable screenshots: `SCREENSHOT_SOURCES=0`.
 
 ## CI schedule
 

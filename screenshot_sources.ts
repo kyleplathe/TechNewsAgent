@@ -83,12 +83,12 @@ function screenshotMode(): 'viewport' | 'content' | 'fullpage' {
 
 function maxContentHeightPx(): number {
   /**
-   * Safety cap on crop height (CSS px). With headline+hero mode (default), the crop is usually
-   * much shorter; this still limits absurdly tall heroes. Raise for more vertical slack in FCP.
+   * Max height of the **content-region** crop (CSS px): from trimmed headline downward through
+   * lede / hero — not the full article. Tweak for slides (title + image visible without tight union crops).
    */
   return Math.min(
     8000,
-    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '1400', 10) || 1400)
+    Math.max(400, parseInt(process.env.SCREENSHOT_MAX_CONTENT_HEIGHT ?? '2200', 10) || 2200)
   );
 }
 
@@ -230,14 +230,13 @@ function trimHeadlineGapEnabled(): boolean {
 }
 
 /**
- * Default on: crop to **title + hero image** (largest qualifying `img` near the `h1`), not the
- * article body. Set `SCREENSHOT_HEADLINE_IMAGE_ONLY=0` for a taller strip from the headline
- * downward (up to `SCREENSHOT_MAX_CONTENT_HEIGHT`).
+ * Default **off**: classic content strip (`clipForContentRegion` + max height). Set
+ * `SCREENSHOT_HEADLINE_IMAGE_ONLY=1` to use the tight **h1 + hero img** union (experimental).
  */
 function headlineImageOnlyEnabled(): boolean {
   const v = process.env.SCREENSHOT_HEADLINE_IMAGE_ONLY?.trim().toLowerCase();
-  if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
-  return true;
+  if (v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+  return false;
 }
 
 function headlineHeroPadPx(): number {
@@ -475,8 +474,8 @@ async function primeLazyMedia(page: Page): Promise<void> {
 }
 
 /**
- * Prefer a tight crop on the story column: by default **headline + hero image** only; otherwise
- * headline-led strip up to `SCREENSHOT_MAX_CONTENT_HEIGHT` — not full viewport or endless scroll.
+ * Content mode: crop article/main to a **headline-led vertical strip** (see `clipForContentRegion`),
+ * capped by `SCREENSHOT_MAX_CONTENT_HEIGHT` — not full viewport or endless scroll.
  */
 async function captureScreenshot(page: Page): Promise<Buffer> {
   const jq = jpegQuality();

@@ -57,17 +57,8 @@ async function getTickerData(): Promise<string> {
   return `BTC: ${btcPrice}  |  BLOCK: ${blockHeight}  |  ${today}  |  LIVE FROM LINDEN HILLS`;
 }
 
-/** Stable hash for the same calendar day (Chicago) so caption rotates daily, not every run. */
-function hashDayKey(dayKey: string): number {
-  let h = 0;
-  for (let i = 0; i < dayKey.length; i++) {
-    h = (h * 31 + dayKey.charCodeAt(i)) >>> 0;
-  }
-  return h;
-}
-
-/** Caption / description block for Reels, Shorts, TikTok, X, Threads, etc. — picks a variant by day. */
-function buildSocialMediaCaption(): string {
+/** First line of Threads / Reels description (fixed branding + date). */
+function formatSocialHeadline(): string {
   const tz = 'America/Chicago';
   const when = new Date().toLocaleDateString('en-US', {
     weekday: 'short',
@@ -76,28 +67,45 @@ function buildSocialMediaCaption(): string {
     year: 'numeric',
     timeZone: tz,
   });
-  const dayKey = new Date().toLocaleDateString('en-CA', { timeZone: tz });
-  const v = hashDayKey(dayKey);
+  return `Tech News Daily with Kyle · ${when}`;
+}
 
-  const tagSets = [
-    '#TechNews #TechNewsDaily #Technology #TechTok #DailyTechNews',
-    '#TechNews #Minneapolis #LindenHills #TechTok #Skateboarding',
-    '#TechNewsDaily #Technology #Apple #AI #Gaming',
-    '#TechNews #Timberwolves #Minneapolis #TechTok #DailyTechNews',
-    '#TechNewsDaily #Developer #Hardware #TechTok',
-  ];
-  const tags = tagSets[v % tagSets.length];
+const THREADS_CAP = 500;
 
-  /** Every post leads with this line (Threads / Reels / etc.). */
-  const headline = `Tech News Daily with Kyle · ${when}`;
+function buildShortTagsFromUsed(used: Collected[]): string {
+  const tags = ['#TechNews', '#TechTok'];
+  if (used.some((c) => c.section === 'LOCAL')) tags.push('#Timberwolves');
+  if (used.some((c) => c.section === 'SKATE')) tags.push('#Skateboarding');
+  return tags.join(' ');
+}
 
-  const hooks = [
-    `Today’s tech desk — software, hardware, AI, games, and the bench. One take, no filler.`,
-    `Fresh tech + Wolves when it matters + a skate hit when it’s real. Follow for tomorrow’s run.`,
-    `Bitcoin-only when digital money comes up — no altcoin noise. Daily from Linden Hills.`,
-    `Short rundown for vertical: grab the screenshots, hit record, post.`,
-  ];
-  return `${headline}\n\n${hooks[v % hooks.length]}\n\n${tags}`;
+function clipTitleForCaption(title: string, max: number): string {
+  const u = title.replace(/\s+/g, ' ').trim();
+  const head = (u.split(/\s*[|·]\s*/)[0] ?? u).trim();
+  return head.length <= max ? head : head.slice(0, max - 1) + '…';
+}
+
+function fallbackSocialBodyFromUsed(used: Collected[]): string {
+  const parts = used.slice(0, 3).map((c) => clipTitleForCaption(c.title, 52));
+  const t = parts.join(' · ');
+  return t || 'Fresh tech from the Linden Hills bench.';
+}
+
+/** Keeps total length within Threads-style limits (~500 chars). */
+function finalizeSocialCaption(
+  headline: string,
+  body: string,
+  tags: string
+): string {
+  let b = body.trim().replace(/\s+/g, ' ').slice(0, 400);
+  if (!b) b = 'Daily roundup from the bench.';
+  let s = `${headline}\n\n${b}\n\n${tags}`;
+  if (s.length <= THREADS_CAP) return s;
+  const overhead = headline.length + tags.length + 4;
+  const maxBody = Math.max(40, THREADS_CAP - overhead - 1);
+  b = b.slice(0, Math.max(1, maxBody - 1)) + '…';
+  s = `${headline}\n\n${b}\n\n${tags}`;
+  return s.length <= THREADS_CAP ? s : s.slice(0, THREADS_CAP);
 }
 
 type Collected = {
@@ -119,6 +127,7 @@ type AirLogEntry = {
 const M_VIDEO = '<<<VIDEO_PROMPT>>>';
 const M_ONAIR = '<<<ON_AIR>>>';
 const M_SOURCES = '<<<SOURCES>>>';
+const M_SOCIAL = '<<<SOCIAL>>>';
 
 function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
   const numLine = afterSources.split(/\n/)[0] ?? '';
@@ -133,13 +142,13 @@ function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
 }
 
 /**
- * Studio layout: VIDEO PROMPT (edit) → ON AIR (VO) → SOURCES (indices).
+ * Studio layout: VIDEO PROMPT → ON AIR → SOURCES (indices) → SOCIAL (optional body).
  * Backward compatible: if markers missing, whole body before SOURCES = onAir only.
  */
 function parseStudioOutput(
   raw: string,
   maxIndex: number
-): { videoPrompt: string; onAir: string; indices: number[] } {
+): { videoPrompt: string; onAir: string; indices: number[]; social: string } {
   const srcPos = raw.indexOf(M_SOURCES);
   let body = raw.trim();
   let indices: number[] = [];
@@ -150,20 +159,34 @@ function parseStudioOutput(
     indices = parseSourceIndices(after, maxIndex);
   }
 
+  let social = '';
+  const sm = raw.indexOf(M_SOCIAL);
+  if (sm >= 0) {
+    let tail = raw.slice(sm + M_SOCIAL.length).trim();
+    const nextMarker = tail.search(/\n<<</);
+    if (nextMarker >= 0) tail = tail.slice(0, nextMarker).trim();
+    social = tail
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('<<<'))
+      .join('\n')
+      .trim()
+      .slice(0, 400);
+  }
+
   const vp = body.indexOf(M_VIDEO);
   const oa = body.indexOf(M_ONAIR);
 
   if (vp >= 0 && oa > vp) {
     const videoPrompt = body.slice(vp + M_VIDEO.length, oa).trim();
     const onAir = body.slice(oa + M_ONAIR.length).trim();
-    return { videoPrompt, onAir, indices };
+    return { videoPrompt, onAir, indices, social };
   }
   if (oa >= 0) {
     const onAir = body.slice(oa + M_ONAIR.length).trim();
-    return { videoPrompt: '', onAir, indices };
+    return { videoPrompt: '', onAir, indices, social };
   }
 
-  return { videoPrompt: '', onAir: body, indices };
+  return { videoPrompt: '', onAir: body, indices, social };
 }
 
 /** Gemini free tier often returns 429 with "Please retry in Xs" — parse that for backoff. */
@@ -505,9 +528,9 @@ async function runNewsAgent() {
   const localBizNote = process.env.LOCAL_BIZ_NOTE?.trim() || '';
 
   const localColorBlock = `
-**LINDEN HILLS / NEIGHBORHOOD (before the final sign-off — keep it organic):**
+**LINDEN HILLS / NEIGHBORHOOD (before the final sign-off):**
 - **1–2 short lines** of local color near **${LOCAL_INTERSECTION_CENTER}** (Lake Harriet, morning-on-the-block energy, etc.).
-- You may **naturally mention** **${localBizName}** in passing — ${localBizPitch} — like you’re talking on the bench, **not** a standalone shout-out segment and **not** hard-sell / “GO CHECK THEM OUT” phrasing.${localBizNote ? `\n- Extra note: ${localBizNote}` : ''}`;
+- **You must** work **${localBizName}** in **once**, in plain conversational passing — ${localBizPitch} (coffee run, walked by, neighbors, whatever fits the beat). **Do not** use the words **shoutout**, **shout-out**, **plug**, or hard-sell / “GO CHECK THEM OUT.”${localBizNote ? `\n- Extra note: ${localBizNote}` : ''}`;
 
   const segmentOrderBlock = hasWolves
     ? `**SEGMENT ORDER (same in both columns — do not reorder):**
@@ -530,7 +553,7 @@ async function runNewsAgent() {
   const prompt = `
 You are a punchy, high-energy tech news anchor filming from your repair shop in Linden Hills (Minneapolis). You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
 
-NUMBERED STORIES FOR TODAY (each has a URL for your reference only — you cannot browse the web):
+NUMBERED STORIES FOR TODAY — **each line is numbered 1, 2, 3…** Those numbers are what you use in **<<<SOURCES>>>** and when you label **SCREENSHOT** lines in the VIDEO PROMPT (same number = same story = same email JPEG / slide):
 ${storyListText}
 
 QUALITY RULES:
@@ -548,9 +571,15 @@ You are writing for a **small professional studio**: one column is the **video /
 ${segmentOrderBlock}
 ${localColorBlock}
 
-**LOCKSTEP + COLUMN A — VIDEO PROMPT:**
+**LOCKSTEP + COLUMN A — VIDEO PROMPT (source screenshots only):**
+- **Visuals:** You use **only** the **source screenshots** attached to the email (one JPEG per covered story). **Do not** call for stock footage, extra B-roll, additional stills you didn’t list, or “add clips.” Every visual is a **site grab** tied to a **story number** from the list above.
 - ${parityStories}. Same order as on air (${beatOrderPhrase}); nothing extra in either column.
-- **Short Markdown only** (editor notes — not read on camera): one \`#\` line, one \`##\` per **news** story, then \`## Close\` for **Linden Hills / neighborhood + soldering sign-off** (no matching SOURCE number). Under each: **2–3 bullets max** — **STILL** / **NOTE** for stories with grabs; **Close** = **CAM** / **NOTE** only.
+- **Short Markdown only** (editor notes — **not** read on camera): one \`#\` show title line, one \`##\` per **news** story (heading = story headline), then \`## Close\` for **Linden Hills + soldering sign-off** (no matching story number in <<<SOURCES>>>).
+- Under each **news** \`##\`: **2 bullets max**:
+  - **SCREENSHOT** — name the **story number** (e.g. “**Story 3** from today’s list — first slide / first grab in email order”).
+  - **NOTE** — one optional edit note (transition, lower third, slide order).
+- **Close** section: **NOTE** bullets only (no fake SCREENSHOT).
+- **Forbidden in this column:** **B-ROLL**, **STOCK**, **CAM** (live camera), “film B-roll,” or any note that implies media beyond the email JPEGs.
 
 ---
 
@@ -560,20 +589,24 @@ ${localColorBlock}
 - **Do not** put [B-ROLL] or shot notes here — VIDEO PROMPT only.
 - START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
 - **Enunciation (INLINE):** phonetic in parentheses **on first mention only** next to the word — short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye). Real acronyms spelled: A I, G P U.
+- **Close:** You **must** say **${localBizName}** once, naturally (see neighborhood block). Never **shoutout**, **shout-out**, **plug**, or hard-sell.
 - END exactly: BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
 
 ---
 
-**OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
+**OUTPUT FORMAT (exactly four blocks, in this order — use these marker lines literally):**
 
 <<<VIDEO_PROMPT>>>
-(Brief Markdown: \`#\` + \`##\` per story, 2–3 bullets; match ON_AIR order, ${beatOrderPhrase}.)
+(Markdown: \`#\` + \`##\` per story + \`## Close\`; **SCREENSHOT** bullets only; match ON_AIR order, ${beatOrderPhrase}.)
 
 <<<ON_AIR>>>
-(ALL CAPS — **lean** script, one take, ~60–120s; same story order as VIDEO_PROMPT; no bracketed shot notes.)
+(ALL CAPS — **lean** script, one take, ~60–120s; same story order as VIDEO_PROMPT.)
 
 <<<SOURCES>>>
-(Exactly **one line** after this marker: comma-separated 1-based story numbers from the list above, e.g. 2,5,7 — no other text on that line. **Order matters**: list the covered story numbers in the **same order you cover them on air** — first number = first beat, etc. Only include stories you actually covered.)
+(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** at the top — e.g. \`2,5,7\` = story **2**, then **5**, then **7**. **Order = slide order** = order of JPEGs in the email: first number = first slide / first grab.)
+
+<<<SOCIAL>>>
+(**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; the system adds that. Max **~280 characters**, 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler. No “link in bio,” no explaining screenshots. Threads-length.)
 `;
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -656,10 +689,8 @@ ${localColorBlock}
     );
   }
 
-  const { videoPrompt, onAir: finalScript, indices } = parseStudioOutput(
-    rawOut,
-    collected.length
-  );
+  const { videoPrompt, onAir: finalScript, indices, social: modelSocial } =
+    parseStudioOutput(rawOut, collected.length);
 
   const fixedOnAir = finalScript.trim();
   const orderedIndices = reorderIndicesByScriptMention(
@@ -673,6 +704,16 @@ ${localColorBlock}
     .map((i) => collected[i - 1])
     .filter(Boolean)
     .filter((c) => c.link);
+
+  const socialHeadline = formatSocialHeadline();
+  let socialBody = modelSocial.trim();
+  if (!socialBody) socialBody = fallbackSocialBodyFromUsed(used);
+  const shortTags = buildShortTagsFromUsed(used);
+  const socialCaption = finalizeSocialCaption(
+    socialHeadline,
+    socialBody,
+    shortTags
+  );
 
   if (!videoPrompt.trim()) {
     console.warn(
@@ -764,11 +805,11 @@ ${localColorBlock}
         contentType: 'image/jpeg',
       }));
       const names = kept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS — ${kept.length} JPEG: ${names}\nHeadline + hero crop; width ~article column (often ~393 CSS px at DPR 1); height varies by page. See repo AGENTS.md for env toggles.\n`;
+      screenshotBannerText = `\nSOURCE SCREENSHOTS — ${kept.length} JPEG: ${names}\nContent-region crop from headline downward (max height SCREENSHOT_MAX_CONTENT_HEIGHT; ~393px-wide column on mobile). Order matches <<<SOURCES>>>. See AGENTS.md.\n`;
       screenshotBannerHtml =
         `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
         `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
-          `${kept.length} JPEG(s) — ${names}. Headline + hero only; dimensions vary (scale to fit in your compound clip). Paywalls/bots may yield partial pages.`
+          `${kept.length} JPEG(s) — ${names}. Article strip (headline + top of story); order matches SOURCES line. Paywalls/bots may yield partial pages.`
         )}</p>`;
     }
     if (shotFails.length) {
@@ -812,7 +853,6 @@ ${localColorBlock}
     'SOCIAL — Tech News Daily with Kyle (video caption / description)';
 
   const tickerLine = await getTickerData();
-  const socialCaption = buildSocialMediaCaption();
   const tickerHtml =
     `<div style="margin:0 0 1.25em;padding:14px 16px;background:#f4f4f5;border-radius:8px;border:1px solid #e4e4e7">` +
     `<pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45;color:#18181b;user-select:all;-webkit-user-select:all">${escapeHtml(tickerLine)}</pre>` +
