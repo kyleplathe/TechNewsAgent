@@ -27,10 +27,22 @@ jobs:
       - name: Checkout TechNewsAgent
         uses: actions/checkout@v6
 
+      # GitHub rejects `secrets` in step `if:` (invalid workflow). Use env + output instead.
+      - name: Detect Instakyle PAT
+        id: instakyle_auth
+        env:
+          INSTAKYLE_PUSH_TOKEN: ${{ secrets.INSTAKYLE_PUSH_TOKEN }}
+        run: |
+          if [ -n "$INSTAKYLE_PUSH_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Fine-grained PAT or classic PAT with repo scope on Instakyle-clean. Omit secret to skip site files + artifact.
       - name: Checkout Instakyle site (manifest seed + /news target)
         id: checkout_instakyle
-        if: ${{ secrets.INSTAKYLE_PUSH_TOKEN != '' }}
+        if: steps.instakyle_auth.outputs.configured == 'true'
         uses: actions/checkout@v6
         with:
           repository: kyleplathe/Instakyle-clean
@@ -114,7 +126,7 @@ jobs:
           BRANCH=$(git rev-parse --abbrev-ref HEAD)
           git fetch origin "$BRANCH"
           if [ "${FORCE_REPUBLISH}" != "true" ] && git cat-file -e "origin/${BRANCH}:public/news/posts/${SLUG}.json" 2>/dev/null; then
-            echo "public/news/posts/${SLUG}.json already exists on origin — skipping push so instakyle.tech/news stays on the first publish for this Chicago date."
+            echo "public/news/posts/${SLUG}.json already exists on origin - skipping push so instakyle.tech/news stays on the first publish for this Chicago date."
             echo "Set repository variable NEWS_SITE_FORCE_REPUBLISH=true to replace, or use workflow_dispatch with a fix."
             exit 0
           fi
