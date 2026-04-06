@@ -10,8 +10,10 @@ name: Daily Tech News Agent
     - cron: '0 10 * * *'
   workflow_dispatch: # Allows you to run it manually for testing
 
+# `contents: read` alone makes every other scope `none`, which blocks artifact upload.
 permissions:
   contents: read
+  actions: write
 
 jobs:
   scrape_and_script:
@@ -55,8 +57,9 @@ jobs:
             fi
             echo "dir=${GITHUB_WORKSPACE}/news-staging" >> "$GITHUB_OUTPUT"
             echo "push_to_instakyle=false" >> "$GITHUB_OUTPUT"
-            echo "Using NEWS_SITE_PUBLISH_MODE=manual — email + artifact only; run 'Publish Tech News to Instakyle' after you film."
+            echo "Using NEWS_SITE_PUBLISH_MODE=manual - email + artifact only; run Publish Tech News to Instakyle after you film."
           else
+            mkdir -p "${GITHUB_WORKSPACE}/instakyle-site/public/news"
             echo "dir=${GITHUB_WORKSPACE}/instakyle-site/public/news" >> "$GITHUB_OUTPUT"
             echo "push_to_instakyle=true" >> "$GITHUB_OUTPUT"
           fi
@@ -92,11 +95,12 @@ jobs:
         run: npx tsx tech_news_agent.ts
 
       - name: Upload news-site-bundle artifact
-        if: steps.instakyle_news.outputs.dir != ''
+        if: success() && steps.instakyle_news.outputs.dir != ''
         uses: actions/upload-artifact@v4
         with:
           name: news-site-bundle
           path: ${{ steps.instakyle_news.outputs.dir }}
+          if-no-files-found: warn
           retention-days: 5
 
       - name: Commit and push Instakyle /news (auto mode only)

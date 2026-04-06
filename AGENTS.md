@@ -43,7 +43,7 @@ Target **one take ~85–100s** (~**90s**). Best practice for a **daily reporter*
 
 ## CI schedule
 
-`.github/workflows/daily_news.yml` — cron is **UTC** (`0 10 * * *` ≈ **5:00 AM America/Chicago** during **CDT**; ≈ **4:00 AM** during **CST** — switch to `0 11 * * *` in winter if you want 5:00 AM local all year).
+`.github/workflows/daily_news.yml` — cron is **UTC** (`0 10 * * *` ≈ **5:00 AM America/Chicago** during **CDT**; ≈ **4:00 AM** during **CST** — switch to `0 11 * * *` in winter if you want 5:00 AM local all year). The workflow sets **`actions: write`** on the `GITHUB_TOKEN` (in addition to `contents: read`) so **`upload-artifact` succeeds**; a `permissions` block with only `contents: read` leaves `actions` at `none` and artifact upload will fail.
 
 With **`INSTAKYLE_PUSH_TOKEN`** set, the workflow checks out **Instakyle-clean** (to seed **`manifest.json`** when needed), runs the agent, then always uploads a **`news-site-bundle`** artifact (retention 5 days). Episode JSON includes **`sourceWorkflowRunId`** / **`sourceWorkflowRunUrl`** so you can match **instakyle.tech/news** to the exact Actions run (and the email from that run).
 
