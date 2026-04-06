@@ -5,9 +5,9 @@ name: Daily Tech News Agent
   push:
     branches: [main]
   schedule:
-    # GitHub cron is UTC only. 0 12 * * * ≈ 7:00 AM America/Chicago during CDT (Mar–early Nov).
-    # During CST (winter), same cron runs ≈ 6:00 AM local; use 0 13 * * * instead if you want ~7:00 AM CST (then ~8:00 AM CDT).
-    - cron: '0 12 * * *'
+    # GitHub cron is UTC only. 0 10 * * * ≈ 5:00 AM America/Chicago during CDT (roughly Mar–Nov).
+    # During CST (winter) the same cron is ≈ 4:00 AM Chicago — switch to 0 11 * * * for ~5:00 AM CST (then ~6:00 AM CDT).
+    - cron: '0 10 * * *'
   workflow_dispatch: # Allows you to run it manually for testing
 
 permissions:
@@ -22,8 +22,44 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout code
+      - name: Checkout TechNewsAgent
         uses: actions/checkout@v6
+
+      # Fine-grained PAT or classic PAT with repo scope on Instakyle-clean. Omit secret to skip site files + artifact.
+      - name: Checkout Instakyle site (manifest seed + /news target)
+        id: checkout_instakyle
+        if: ${{ secrets.INSTAKYLE_PUSH_TOKEN != '' }}
+        uses: actions/checkout@v6
+        with:
+          repository: kyleplathe/Instakyle-clean
+          path: instakyle-site
+          token: ${{ secrets.INSTAKYLE_PUSH_TOKEN }}
+
+      - name: Resolve news output directory and publish mode
+        id: instakyle_news
+        env:
+          TOKEN_PRESENT: ${{ secrets.INSTAKYLE_PUSH_TOKEN }}
+          PUBLISH_MODE: ${{ vars.NEWS_SITE_PUBLISH_MODE }}
+        run: |
+          set -e
+          MODE="${PUBLISH_MODE:-auto}"
+          if [ -z "${TOKEN_PRESENT}" ]; then
+            echo "dir=" >> "$GITHUB_OUTPUT"
+            echo "push_to_instakyle=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$MODE" = "manual" ]; then
+            mkdir -p "${GITHUB_WORKSPACE}/news-staging"
+            if [ -f instakyle-site/public/news/manifest.json ]; then
+              cp instakyle-site/public/news/manifest.json "${GITHUB_WORKSPACE}/news-staging/manifest.json"
+            fi
+            echo "dir=${GITHUB_WORKSPACE}/news-staging" >> "$GITHUB_OUTPUT"
+            echo "push_to_instakyle=false" >> "$GITHUB_OUTPUT"
+            echo "Using NEWS_SITE_PUBLISH_MODE=manual — email + artifact only; run 'Publish Tech News to Instakyle' after you film."
+          else
+            echo "dir=${GITHUB_WORKSPACE}/instakyle-site/public/news" >> "$GITHUB_OUTPUT"
+            echo "push_to_instakyle=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -49,4 +85,41 @@ jobs:
           FEED_ITEM_LIMIT: ${{ vars.FEED_ITEM_LIMIT }}
           # Optional: set to 0/false to skip JPEG attachments (saves CI time).
           SCREENSHOT_SOURCES: ${{ vars.SCREENSHOT_SOURCES }}
+          # After a successful Resend send: writes under this directory (see Resolve step).
+          TECHNEWS_INSTAKYLE_NEWS_DIR: ${{ steps.instakyle_news.outputs.dir }}
+          TECHNEWS_SITE_ORIGIN: ${{ vars.TECHNEWS_SITE_ORIGIN }}
+          TECHNEWS_VIDEO_URL: ${{ secrets.TECHNEWS_VIDEO_URL }}
         run: npx tsx tech_news_agent.ts
+
+      - name: Upload news-site-bundle artifact
+        if: steps.instakyle_news.outputs.dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: news-site-bundle
+          path: ${{ steps.instakyle_news.outputs.dir }}
+          retention-days: 5
+
+      - name: Commit and push Instakyle /news (auto mode only)
+        if: steps.instakyle_news.outputs.push_to_instakyle == 'true'
+        env:
+          FORCE_REPUBLISH: ${{ vars.NEWS_SITE_FORCE_REPUBLISH }}
+        working-directory: instakyle-site
+        run: |
+          set -e
+          SLUG=$(TZ=America/Chicago date +%Y-%m-%d)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          git fetch origin "$BRANCH"
+          if [ "${FORCE_REPUBLISH}" != "true" ] && git cat-file -e "origin/${BRANCH}:public/news/posts/${SLUG}.json" 2>/dev/null; then
+            echo "public/news/posts/${SLUG}.json already exists on origin — skipping push so instakyle.tech/news stays on the first publish for this Chicago date."
+            echo "Set repository variable NEWS_SITE_FORCE_REPUBLISH=true to replace, or use workflow_dispatch with a fix."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/news
+          if git diff --staged --quiet; then
+            echo "No changes under public/news."
+          else
+            git commit -m "chore(news): daily Tech News episode (${SLUG})"
+            git push origin HEAD
+          fi

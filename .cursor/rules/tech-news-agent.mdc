@@ -10,5 +10,5 @@ alwaysApply: false
 - **Scope:** Broad tech (software, AI, hardware, gaming, dev, repair/maker); **Timberwolves** + **skate** as ordered segments; **Linden Hills** close; **Bitcoin-only** for digital money (no altcoin industry). Logic in `passesBitcoinOnlyCurrencyRule` and the Gemini prompt string.
 - **Freshness:** Defaults in `DEFAULT_MAX_STORY_AGE_HOURS`; override with `MAX_STORY_AGE_HOURS_TECH` (etc.). Undated feed items are rejected unless `ALLOW_UNDATED_FEED_ITEMS=1`.
 - **Feeds:** Arrays `techFeeds` / `hardwareFeeds` / `skateFeeds` / `localFeeds` in `tech_news_agent.ts`; NBA supplement `nba_wolves_news.ts`.
-- **Screenshots:** Default `SCREENSHOT_MODE=viewport` = full mobile frame (~393×852); `content` mode for article crop + `SCREENSHOT_MAX_CONTENT_HEIGHT`; optional `SCREENSHOT_HEADLINE_IMAGE_ONLY=1`.
+- **Screenshots:** Default `SCREENSHOT_MODE=viewport` = full mobile frame (~393×852); `content` mode for article crop + `SCREENSHOT_MAX_CONTENT_HEIGHT`; optional `SCREENSHOT_HEADLINE_IMAGE_ONLY=1`. Optional web export: `TECHNEWS_WEB_DIR` → `latest.json` + `web/technews.html` via `web_publish.ts`.
 - **Docs:** See root `AGENTS.md` for full maintainer summary.

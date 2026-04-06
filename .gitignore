@@ -8,3 +8,9 @@ node_modules/
 
 # OS / editor
 .DS_Store
+
+# Optional local output for TECHNEWS_WEB_DIR
+technews-publish/
+
+# Local clone of the business site (for integration work only)
+_instakyle-preview/

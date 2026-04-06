@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tech News — Daily</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #fafafa;
+      --card: #fff;
+      --text: #111;
+      --muted: #666;
+      --border: #e5e5e5;
+      --link: #2563eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0a0a0a;
+        --card: #141414;
+        --text: #f4f4f5;
+        --muted: #a1a1aa;
+        --border: #27272a;
+        --link: #60a5fa;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .wrap { max-width: 42rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+    h1 { font-size: 1.35rem; font-weight: 700; margin: 0 0 0.25rem; }
+    .date { color: var(--muted); font-size: 0.95rem; margin-bottom: 1.5rem; }
+    .ticker {
+      font-size: 0.8rem;
+      padding: 0.75rem 1rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-bottom: 1.75rem;
+    }
+    .err {
+      padding: 1rem;
+      background: #fef2f2;
+      color: #991b1b;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    @media (prefers-color-scheme: dark) {
+      .err { background: #2a1212; color: #fca5a5; }
+    }
+    article {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 1.25rem;
+    }
+    article h2 { font-size: 1.05rem; margin: 0 0 0.35rem; font-weight: 650; }
+    .meta { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem; }
+    .shot {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      margin: 0.75rem 0;
+      border: 1px solid var(--border);
+    }
+    .notes {
+      font-size: 0.88rem;
+      color: var(--muted);
+      white-space: pre-wrap;
+      margin: 0.5rem 0 0;
+    }
+    .notes:empty { display: none; }
+    a.source {
+      display: inline-block;
+      margin-top: 0.65rem;
+      font-size: 0.9rem;
+      color: var(--link);
+      word-break: break-all;
+    }
+    footer {
+      margin-top: 2rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 id="title">Tech News Daily</h1>
+    <p class="date" id="date"></p>
+    <div class="ticker" id="ticker" hidden></div>
+    <div id="stories"></div>
+    <footer id="foot"></footer>
+  </div>
+  <script>
+    (function () {
+      var root = document.getElementById('stories');
+      var dateEl = document.getElementById('date');
+      var tickerEl = document.getElementById('ticker');
+      var foot = document.getElementById('foot');
+
+      function showError(msg) {
+        root.innerHTML = '<p class="err" role="alert">' + msg + '</p>';
+      }
+
+      fetch('latest.json', { cache: 'no-store' })
+        .then(function (r) {
+          if (!r.ok) throw new Error('Could not load latest.json (' + r.status + '). Deploy this folder via HTTPS and keep latest.json next to technews.html.');
+          return r.json();
+        })
+        .then(function (data) {
+          if (!data || data.schemaVersion !== 1 || !Array.isArray(data.stories)) {
+            showError('Invalid latest.json format.');
+            return;
+          }
+          dateEl.textContent = data.displayDate || '';
+          if (data.tickerLine) {
+            tickerEl.textContent = data.tickerLine;
+            tickerEl.hidden = false;
+          }
+          var frag = document.createDocumentFragment();
+          data.stories.forEach(function (s) {
+            var art = document.createElement('article');
+            var meta = document.createElement('div');
+            meta.className = 'meta';
+            meta.textContent = '[' + s.section + '] · story #' + s.storyIndex;
+            art.appendChild(meta);
+            var h2 = document.createElement('h2');
+            h2.textContent = s.studioHeadline || s.title || 'Story';
+            art.appendChild(h2);
+            if (s.image) {
+              var img = document.createElement('img');
+              img.className = 'shot';
+              img.src = s.imageUrl || s.image;
+              img.alt = '';
+              img.loading = 'lazy';
+              art.appendChild(img);
+            }
+            if (s.studioNotesMarkdown) {
+              var pre = document.createElement('pre');
+              pre.className = 'notes';
+              pre.textContent = s.studioNotesMarkdown;
+              art.appendChild(pre);
+            }
+            var a = document.createElement('a');
+            a.className = 'source';
+            a.href = s.link;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = 'Read article →';
+            art.appendChild(a);
+            frag.appendChild(art);
+          });
+          root.appendChild(frag);
+          foot.textContent = 'Updated ' + (data.publishedAt || '') + ' · Source links open in a new tab.';
+        })
+        .catch(function (e) {
+          showError(e.message || String(e));
+          foot.textContent = 'Tip: use a static host (Netlify, Cloudflare Pages, S3 website, or npx serve) so latest.json loads over HTTP(S). file:// will not work.';
+        });
+    })();
+  </script>
+</body>
+</html>

@@ -572,7 +572,7 @@ ${segmentOrderBlock}
 ${localColorBlock}
 
 **LOCKSTEP + COLUMN A — VIDEO PROMPT (source screenshots only):**
-- **Visuals:** You use **only** the **source screenshots** attached to the email (one JPEG per covered story). By default they are **full mobile viewport grabs** (phone-shaped frame: site chrome + headline + fold of the article — same idea as a normal screen recording still). **Do not** call for stock footage, extra B-roll, additional stills you didn’t list, or “add clips.” Every visual is a **site grab** tied to a **story number** from the list above.
+- **Visuals:** You use **only** the **source screenshots** attached to the email (one JPEG per covered story). By default they are **full mobile viewport grabs** (phone-shaped frame: site chrome + headline + fold of the article — same idea as a normal screen recording still; ~393×852 CSS px unless overridden). **Do not** call for stock footage, extra B-roll, additional stills you didn’t list, or “add clips.” Every visual is a **site grab** tied to a **story number** from the list above.
 - ${parityStories}. Same order as on air (${beatOrderPhrase}); nothing extra in either column.
 - **Short Markdown only** (editor notes — **not** read on camera): one \`#\` show title line, one \`##\` per **news** story (heading = story headline), then \`## Close\` for **Linden Hills + soldering sign-off** (no matching story number in <<<SOURCES>>>).
 - Under each **news** \`##\`: **2 bullets max**:
@@ -764,6 +764,12 @@ ${localColorBlock}
     | undefined;
   let screenshotBannerText = '';
   let screenshotBannerHtml = '';
+  let screenshotKept: Array<{
+    storyIndex: number;
+    filename: string;
+    content: Buffer;
+    link: string;
+  }> = [];
 
   if (envScreenshotsEnabled() && screenshotItems.length) {
     const max = Math.min(
@@ -786,7 +792,7 @@ ${localColorBlock}
       )
     );
     let total = 0;
-    const kept: typeof shots = [];
+    screenshotKept = [];
     for (const s of shots) {
       if (total + s.content.length > maxBytes) {
         console.warn(
@@ -795,21 +801,21 @@ ${localColorBlock}
         break;
       }
       total += s.content.length;
-      kept.push(s);
+      screenshotKept.push(s);
     }
 
-    if (kept.length) {
-      attachments = kept.map((s) => ({
+    if (screenshotKept.length) {
+      attachments = screenshotKept.map((s) => ({
         filename: s.filename,
         content: s.content,
         contentType: 'image/jpeg',
       }));
-      const names = kept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS — ${kept.length} JPEG: ${names}\nDefault: **viewport** = full mobile frame (~393×852 CSS px at DPR 1 unless SCREENSHOT_WIDTH/HEIGHT set). Use SCREENSHOT_MODE=content for article-only crop. Order matches <<<SOURCES>>>. See AGENTS.md.\n`;
+      const names = screenshotKept.map((s) => s.filename).join(', ');
+      screenshotBannerText = `\nSOURCE SCREENSHOTS — ${screenshotKept.length} JPEG: ${names}\nDefault: **viewport** = full mobile frame (~393×852 CSS px at DPR 1 unless SCREENSHOT_WIDTH/HEIGHT set). Use SCREENSHOT_MODE=content for article-only crop. Order matches <<<SOURCES>>>. See AGENTS.md.\n`;
       screenshotBannerHtml =
         `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
         `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
-          `${kept.length} JPEG(s) — ${names}. Default full mobile viewport (phone-shaped grab); order matches SOURCES. Paywalls/bots may yield partial pages.`
+          `${screenshotKept.length} JPEG(s) — ${names}. Default full mobile viewport (phone-shaped grab); order matches SOURCES. Paywalls/bots may yield partial pages.`
         )}</p>`;
     }
     if (shotFails.length) {
@@ -842,6 +848,8 @@ ${localColorBlock}
   const to = toRaw.split(',').map((a) => a.trim()).filter(Boolean);
   const resend = new Resend(resendKey);
 
+  const tickerLine = await getTickerData();
+
   const linksHeader =
     used.length > 0
       ? 'SOURCE LINKS (for this segment — screenshots / posts)'
@@ -852,7 +860,6 @@ ${localColorBlock}
   const socialHeader =
     'SOCIAL — Tech News Daily with Kyle (video caption / description)';
 
-  const tickerLine = await getTickerData();
   const tickerHtml =
     `<div style="margin:0 0 1.25em;padding:14px 16px;background:#f4f4f5;border-radius:8px;border:1px solid #e4e4e7">` +
     `<pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45;color:#18181b;user-select:all;-webkit-user-select:all">${escapeHtml(tickerLine)}</pre>` +
@@ -908,6 +915,39 @@ ${localColorBlock}
 
   if (sendErr) {
     throw new Error(`Resend: ${sendErr.message} (${sendErr.name})`);
+  }
+
+  const webDir = process.env.TECHNEWS_WEB_DIR?.trim();
+  const instakyleNewsDir = process.env.TECHNEWS_INSTAKYLE_NEWS_DIR?.trim();
+  const techNewsVideoUrl = process.env.TECHNEWS_VIDEO_URL?.trim() || null;
+  if ((webDir || instakyleNewsDir) && used.length) {
+    const { writeTechNewsWebBundle } = await import('./web_publish');
+    const webStories = used.map((c, j) => {
+      const storyIndex = orderedIndices[j]!;
+      const shot = screenshotKept.find((k) => k.storyIndex === storyIndex);
+      return {
+        storyIndex,
+        section: c.section,
+        title: c.title,
+        link: c.link,
+        imageFilename: shot?.filename,
+        imageBuffer: shot?.content,
+      };
+    });
+    await writeTechNewsWebBundle({
+      ...(webDir ? { outDir: webDir } : {}),
+      ...(instakyleNewsDir ? { instakyleNewsDir } : {}),
+      tickerLine,
+      socialCaption,
+      videoPromptMarkdown: videoPrompt.trim(),
+      onAirPlain: fixedOnAir.trim(),
+      stories: webStories,
+      videoUrl: techNewsVideoUrl,
+      publicBaseUrl: process.env.TECHNEWS_PUBLIC_BASE_URL?.trim() || undefined,
+      siteOrigin: process.env.TECHNEWS_SITE_ORIGIN?.trim() || undefined,
+      includeHtmlShell:
+        process.env.TECHNEWS_WEB_HTML?.trim().toLowerCase() !== '0',
+    });
   }
 
   if (orderedIndices.length) {

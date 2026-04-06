@@ -1,0 +1,92 @@
+# Pushes the news bundle from a completed "Daily Tech News Agent" run to Instakyle.
+# Use when NEWS_SITE_PUBLISH_MODE=manual: run this after you film so instakyle.tech/news matches that morning's email/script.
+
+name: Publish Tech News to Instakyle
+
+'on':
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Run ID of a successful Daily Tech News Agent workflow (leave empty = latest success)'
+        required: false
+        type: string
+      force_replace_today:
+        description: 'Overwrite if today’s episode is already on the site'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (for gh + context)
+        uses: actions/checkout@v6
+
+      - name: Resolve source workflow run
+        id: src
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if [ -n "${{ inputs.source_run_id }}" ]; then
+            echo "run_id=${{ inputs.source_run_id }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          RID=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --workflow=daily_news.yml \
+            --status=success \
+            --limit=1 \
+            --json databaseId \
+            -q '.[0].databaseId')
+          if [ -z "$RID" ] || [ "$RID" = "null" ]; then
+            echo "No successful Daily Tech News Agent run found."
+            exit 1
+          fi
+          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
+          echo "Using workflow run: $RID"
+
+      - name: Download news-site-bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: news-site-bundle
+          path: bundle
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.src.outputs.run_id }}
+
+      - name: Checkout Instakyle
+        uses: actions/checkout@v6
+        with:
+          repository: kyleplathe/Instakyle-clean
+          path: instakyle-site
+          token: ${{ secrets.INSTAKYLE_PUSH_TOKEN }}
+
+      - name: Merge bundle into public/news and push
+        working-directory: instakyle-site
+        run: |
+          set -e
+          SLUG=$(TZ=America/Chicago date +%Y-%m-%d)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          git fetch origin "$BRANCH"
+          if [ "${{ inputs.force_replace_today }}" != "true" ]; then
+            if git cat-file -e "origin/${BRANCH}:public/news/posts/${SLUG}.json" 2>/dev/null; then
+              echo "Episode ${SLUG} is already live on the default branch. Re-run with force_replace_today to overwrite."
+              exit 0
+            fi
+          fi
+          rsync -a "${GITHUB_WORKSPACE}/bundle/" "public/news/"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/news
+          if git diff --staged --quiet; then
+            echo "No git changes (bundle matched tree)."
+          else
+            git commit -m "chore(news): publish Tech News episode (${SLUG})"
+            git push origin HEAD
+          fi

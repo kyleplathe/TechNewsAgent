@@ -53,7 +53,7 @@ function mobileMode(): boolean {
 }
 
 function viewport(): { width: number; height: number } {
-  // Mobile defaults ≈ iPhone portrait CSS px (393×852) for narrow grabs; desktop fallback 720×1280.
+  // Mobile defaults ≈ iPhone portrait CSS px (393×852); desktop fallback 720×1280.
   // Override with SCREENSHOT_WIDTH / SCREENSHOT_HEIGHT.
   const defaultW = mobileMode() ? 393 : 720;
   const defaultH = mobileMode() ? 852 : 1280;
