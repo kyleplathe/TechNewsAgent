@@ -44,17 +44,18 @@ export type TechNewsWebPayload = {
   sourceWorkflowRunUrl?: string | null;
   tickerLine: string;
   socialCaption: string;
-  videoPromptMarkdown: string;
+  /** Plain-text editor column (no Markdown). */
+  videoPrompt: string;
   onAirPlain: string;
   stories: Array<{
     storyIndex: number;
     section: string;
     title: string;
     link: string;
-    /** `##` heading from VIDEO PROMPT when parseable */
+    /** Headline line after a STORY delimiter (or legacy `## ` heading) */
     studioHeadline: string;
-    /** Bullets under that heading (SCREENSHOT / NOTE, etc.) */
-    studioNotesMarkdown: string;
+    /** SCREENSHOT / NOTE lines under that story */
+    studioNotes: string;
     /** Relative to bundle root (generic) or under `/news/` (Instakyle post) */
     image: string | null;
     /** Absolute URL when a public base was configured */
@@ -78,11 +79,43 @@ export type NewsManifest = {
   }>;
 };
 
-/**
- * Pull non-Close `##` sections from the model's VIDEO PROMPT (Markdown).
- * Order should match on-air story order when the model follows instructions.
- */
-export function parseVideoPromptStorySections(
+function looksLikePlainStoryFormat(s: string): boolean {
+  return s.split('\n').some((l) => l.trim() === 'STORY');
+}
+
+function parseStoryDelimiterSections(
+  text: string
+): Array<{ headline: string; body: string }> {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const sections: Array<{ headline: string; body: string }> = [];
+  let i = 0;
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+    if (trimmed === 'CLOSE') break;
+    if (trimmed === 'STORY') {
+      i++;
+      while (i < lines.length && lines[i].trim() === '') i++;
+      if (i >= lines.length) break;
+      const headline = lines[i].trim();
+      i++;
+      if (/^close\b/i.test(headline)) continue;
+      const bodyLines: string[] = [];
+      while (i < lines.length) {
+        const t = lines[i].trim();
+        if (t === 'STORY' || t === 'CLOSE') break;
+        bodyLines.push(lines[i]);
+        i++;
+      }
+      sections.push({ headline, body: bodyLines.join('\n').trim() });
+      continue;
+    }
+    i++;
+  }
+  return sections;
+}
+
+/** Legacy Gemini output: `## Headline` sections. */
+function parseMarkdownHashSections(
   videoPrompt: string
 ): Array<{ headline: string; body: string }> {
   const lines = videoPrompt.replace(/\r\n/g, '\n').split('\n');
@@ -105,6 +138,21 @@ export function parseVideoPromptStorySections(
     }
   }
   return sections;
+}
+
+/**
+ * Story blocks from VIDEO PROMPT: **STORY** / **CLOSE** plain format preferred;
+ * falls back to legacy Markdown `##` sections if no STORY lines or plain parses empty.
+ */
+export function parseVideoPromptStorySections(
+  videoPrompt: string
+): Array<{ headline: string; body: string }> {
+  const normalized = videoPrompt.replace(/\r\n/g, '\n');
+  if (looksLikePlainStoryFormat(normalized)) {
+    const plain = parseStoryDelimiterSections(normalized);
+    if (plain.length > 0) return plain;
+  }
+  return parseMarkdownHashSections(normalized);
 }
 
 function joinUrl(base: string, rel: string): string {
@@ -147,7 +195,7 @@ export type WriteWebBundleOptions = {
   instakyleNewsDir?: string;
   tickerLine: string;
   socialCaption: string;
-  videoPromptMarkdown: string;
+  videoPrompt: string;
   onAirPlain: string;
   stories: WebPublishStoryInput[];
   /** Optional link embedded in JSON + manifest (e.g. YouTube). */
@@ -174,7 +222,7 @@ export async function writeTechNewsWebBundle(
     instakyleNewsDir,
     tickerLine,
     socialCaption,
-    videoPromptMarkdown,
+    videoPrompt,
     onAirPlain,
     stories,
     videoUrl = null,
@@ -190,10 +238,10 @@ export async function writeTechNewsWebBundle(
     throw new Error('writeTechNewsWebBundle: set outDir and/or instakyleNewsDir');
   }
 
-  const sections = parseVideoPromptStorySections(videoPromptMarkdown);
+  const sections = parseVideoPromptStorySections(videoPrompt);
   if (sections.length !== stories.length && stories.length > 0) {
     console.warn(
-      `WEB: VIDEO PROMPT has ${sections.length} non-Close ## sections but ${stories.length} sourced stories — studio headlines may not line up; falling back to feed titles where needed.`
+      `WEB: VIDEO PROMPT has ${sections.length} story blocks but ${stories.length} sourced stories — studio headlines may not line up; falling back to feed titles where needed.`
     );
   }
 
@@ -221,7 +269,7 @@ export async function writeTechNewsWebBundle(
     title: string;
     link: string;
     studioHeadline: string;
-    studioNotesMarkdown: string;
+    studioNotes: string;
     imageFilename?: string;
     imageBuffer?: Buffer;
   };
@@ -236,7 +284,7 @@ export async function writeTechNewsWebBundle(
       title: s.title,
       link: s.link,
       studioHeadline: sec?.headline?.trim() || s.title,
-      studioNotesMarkdown: sec?.body?.trim() || '',
+      studioNotes: sec?.body?.trim() || '',
       imageFilename: s.imageFilename,
       imageBuffer: s.imageBuffer,
     });
@@ -264,7 +312,7 @@ export async function writeTechNewsWebBundle(
         title: b.title,
         link: b.link,
         studioHeadline: b.studioHeadline,
-        studioNotesMarkdown: b.studioNotesMarkdown,
+        studioNotes: b.studioNotes,
         image: relImage,
         imageUrl,
       });
@@ -279,7 +327,7 @@ export async function writeTechNewsWebBundle(
       ...runMeta,
       tickerLine,
       socialCaption,
-      videoPromptMarkdown,
+      videoPrompt,
       onAirPlain,
       stories: payloadStories,
     };
@@ -329,7 +377,7 @@ export async function writeTechNewsWebBundle(
         title: b.title,
         link: b.link,
         studioHeadline: b.studioHeadline,
-        studioNotesMarkdown: b.studioNotesMarkdown,
+        studioNotes: b.studioNotes,
         image: rel,
         imageUrl,
       });
@@ -345,7 +393,7 @@ export async function writeTechNewsWebBundle(
       ...runMeta,
       tickerLine,
       socialCaption,
-      videoPromptMarkdown,
+      videoPrompt,
       onAirPlain,
       stories: postStories,
     };

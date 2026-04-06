@@ -7,7 +7,7 @@ Single Node script (`tech_news_agent.ts`) pulls RSS (+ NBA.com Timberwolves embe
 - **Tech:** Software, AI/ML, hardware & gadgets, gaming (news + industry), developer ecosystem, security when it’s tech news, repair/maker (e.g. Hackaday). Sources are listed in `tech_news_agent.ts` (`techFeeds` / `hardwareFeeds`).
 - **Sports:** Timberwolves — Canis Hoopus RSS + `nba_wolves_news.ts` (NBA.com index). Tagged **[LOCAL]**.
 - **Skate:** Thrasher, Jenkem, Quartersnacks, Village Psychic, The Berrics (best-effort). Tagged **[SKATE]**.
-- **Close:** Linden Hills neighborhood color + optional local business mention (organic, not a hard sell). See `local_businesses.ts` / `LOCAL_BIZ_*` env.
+- **Close:** Linden Hills neighborhood color + **required** one spoken mention of the chosen local business name (from `LOCAL_BIZ_NAME` or `local_businesses.ts` rotation), organic not a hard sell; Gemini prompt treats this as **non-negotiable** in ON AIR before the fixed sign-off.
 - **Digital assets:** **Bitcoin-only** on-air and in headlines (`passesBitcoinOnlyCurrencyRule`). No altcoins, stablecoins, NFT/DeFi/Web3 industry beats. Set `BITCOIN_ONLY_CURRENCY_RULE=0` to disable filtering.
 
 ## Freshness
@@ -25,7 +25,7 @@ Items **without a parseable `pubDate` / Atom date** are **dropped** unless `ALLO
 
 ## Email layout (precision)
 
-Order: **Ticker** → **VIDEO PROMPT** (Markdown) → **ON AIR** (ALL CAPS) → **SOCIAL** caption → **SOURCE LINKS** → screenshot note + attachments.
+Order: **Ticker** → **VIDEO PROMPT** (plain text, no Markdown) → **ON AIR** (ALL CAPS) → **SOCIAL** caption → **SOURCE LINKS** → screenshot note + attachments.
 
 Markers in model output: `<<<VIDEO_PROMPT>>>`, `<<<ON_AIR>>>`, `<<<SOURCES>>>` (one line of comma-separated 1-based story numbers = same numbers as the **numbered list** in the prompt = **slide / JPEG order**), then `<<<SOCIAL>>>` (short Threads-style body; the script prepends the title line and hashtags).
 
@@ -39,7 +39,7 @@ If the email looks truncated or missing a column, check Gemini `maxOutputTokens`
 
 ## Voiceover length (~90s desk)
 
-Target **one take ~85–100s** (~**90s**). Best practice for a **daily reporter**: **one beat → one point → one proof** (headline + why it matters + a single concrete detail — number, name, mechanism — when the story gives it). Skip beats that need a paragraph; skip essay transitions. Close stays short (neighborhood + sign-off).
+Target **one take ~85–100s** (~**90s**). Best practice for a **daily reporter**: **one beat → one point → one proof** (headline + why it matters + a single concrete detail — number, name, mechanism — when the story gives it). Skip beats that need a paragraph; skip essay transitions. Close stays short (neighborhood + sign-off). Gemini prompt steers **away** from hype / podcast clichés (“hold on to your hats,” “deep dive,” “buckle up,” etc.) — calm bench voice, not trailer energy.
 
 ## CI schedule
 
@@ -70,7 +70,7 @@ Resend, Gemini, `RESEND_TO`, optional `FEED_ITEM_LIMIT`, `SCREENSHOT_*`, `GEMINI
 
 ## TechNews web bundle (optional)
 
-Set **`TECHNEWS_WEB_DIR`** to an absolute or relative path; after a **successful Resend send** the agent writes **`latest.json`**, **`images/*.jpg`** (when screenshots exist), and **`technews.html`** (static shell; disable with `TECHNEWS_WEB_HTML=0`). Talking-point text per story is parsed from the **VIDEO PROMPT** `##` sections (aligned with `<<<SOURCES>>>` order). Optional **`TECHNEWS_PUBLIC_BASE_URL`** (no trailing slash) adds absolute `imageUrl` fields for hosting images on a CDN. Deploy the folder to any static host (S3/Cloudflare R2 website, Netlify, Vercel static, etc.) or sync from CI; the page loads `latest.json` via `fetch` (needs HTTP(S), not `file://`).
+Set **`TECHNEWS_WEB_DIR`** to an absolute or relative path; after a **successful Resend send** the agent writes **`latest.json`**, **`images/*.jpg`** (when screenshots exist), and **`technews.html`** (static shell; disable with `TECHNEWS_WEB_HTML=0`). Talking-point text per story is parsed from the **VIDEO PROMPT** **STORY** blocks (legacy **`##`** Markdown still supported). Optional **`TECHNEWS_PUBLIC_BASE_URL`** (no trailing slash) adds absolute `imageUrl` fields for hosting images on a CDN. Deploy the folder to any static host (S3/Cloudflare R2 website, Netlify, Vercel static, etc.) or sync from CI; the page loads `latest.json` via `fetch` (needs HTTP(S), not `file://`).
 
 ### Instakyle site (`/news`)
 

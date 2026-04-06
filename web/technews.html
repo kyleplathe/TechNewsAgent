@@ -145,10 +145,11 @@
               img.loading = 'lazy';
               art.appendChild(img);
             }
-            if (s.studioNotesMarkdown) {
+            var notes = s.studioNotes || s.studioNotesMarkdown;
+            if (notes) {
               var pre = document.createElement('pre');
               pre.className = 'notes';
-              pre.textContent = s.studioNotesMarkdown;
+              pre.textContent = notes;
               art.appendChild(pre);
             }
             var a = document.createElement('a');

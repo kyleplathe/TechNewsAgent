@@ -514,7 +514,7 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const storyPickRule = `- Pick **3–5** beats from **[TECH]** + **[HARDWARE]** + **[SKATE]** combined (often **3–4** is right for a **single-take ~85–100s** read — aim **~90s**). Lead with strongest **same-day / last-few-hours** energy; skate = one quick hitter only if it’s genuinely good today.
+  const storyPickRule = `- Pick **3–5** beats from **[TECH]** + **[HARDWARE]** + **[SKATE]** combined (often **3–4** is right for a **single-take ~85–100s** read — aim **~90s**). Lead with strongest **same-day / last-few-hours** news; skate = one quick hitter only if it’s genuinely good today.
 - **Coverage mix:** software, AI/ML, hardware & gadgets, gaming (industry + games), dev tools, repair/maker — all fair game from the **[TECH]** + **[HARDWARE]** pool. **Hardware:** only when **[HARDWARE]** is clearly fresh / newsworthy; never force a device beat; don’t repeat the same product on slow news days.`;
 
   const hasWolves = collected.some((c) => c.section === 'LOCAL');
@@ -528,9 +528,10 @@ async function runNewsAgent() {
   const localBizNote = process.env.LOCAL_BIZ_NOTE?.trim() || '';
 
   const localColorBlock = `
-**LINDEN HILLS / NEIGHBORHOOD (before the final sign-off):**
-- **1–2 short lines** of local color near **${LOCAL_INTERSECTION_CENTER}** (Lake Harriet, morning-on-the-block energy, etc.).
-- **You must** work **${localBizName}** in **once**, in plain conversational passing — ${localBizPitch} (coffee run, walked by, neighbors, whatever fits the beat). **Do not** use the words **shoutout**, **shout-out**, **plug**, or hard-sell / “GO CHECK THEM OUT.”${localBizNote ? `\n- Extra note: ${localBizNote}` : ''}`;
+**LINDEN HILLS / NEIGHBORHOOD + LOCAL BUSINESS (before the fixed END lines — NOT optional):**
+- **1–2 short lines** of local color near **${LOCAL_INTERSECTION_CENTER}** (Lake Harriet, morning-on-the-block tone, etc.).
+- **Non-negotiable:** The spoken name **${localBizName}** must appear **exactly once** in **COLUMN B (ON AIR)**, in this close segment **before** “BACK TO THE SOLDERING IRON…” — plain conversational passing — ${localBizPitch} (coffee run, walked by, neighbors, whatever fits). **Do not** use **shoutout**, **shout-out**, **plug**, or hard-sell / “GO CHECK THEM OUT.”
+- If you omit **${localBizName}** from ON AIR, the script is **wrong**.${localBizNote ? `\n- Extra note: ${localBizNote}` : ''}`;
 
   const segmentOrderBlock = hasWolves
     ? `**SEGMENT ORDER (same in both columns — do not reorder):**
@@ -548,10 +549,10 @@ async function runNewsAgent() {
     : 'tech → skate → close';
 
   const parityStories =
-    'Pick your covered stories once (**usually 3–4**). **Every** ON_AIR beat needs a **matching** VIDEO_PROMPT \`##\`';
+    'Pick your covered stories once (**usually 3–4**). **Every** ON_AIR beat needs a **matching** VIDEO_PROMPT **STORY** block (same order)';
 
   const prompt = `
-You are a punchy, high-energy tech news anchor filming from your repair shop in Linden Hills (Minneapolis). You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
+You are a **direct, plain-spoken** tech reporter at your repair bench in Linden Hills (Minneapolis) — calm morning desk, not hype. You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
 
 NUMBERED STORIES FOR TODAY — **each line is numbered 1, 2, 3…** Those numbers are what you use in **<<<SOURCES>>>** and when you label **SCREENSHOT** lines in the VIDEO PROMPT (same number = same story = same email JPEG / slide):
 ${storyListText}
@@ -564,43 +565,45 @@ ${storyPickRule}
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
 - **Wolves / LOCAL** — **Canis Hoopus (RSS)** plus **NBA.com Timberwolves** index (same **[LOCAL]** list). Use the basketball beat **only** when the item is **fresh**; if nothing qualifies, **skip Wolves** entirely.
 - Skateboarding: use **[SKATE]** for one quick, legit beat (premiere, contest, real news). Skip if nothing’s good.
-- **One vertical take, ~85–100 seconds** read aloud (target **~90s**) — **tight but not thin**: add **one concrete detail** on main beats when the headline gives you something real (a number, vendor, mechanism, “what they found”) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack”). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
+- **One vertical take, ~85–100 seconds** read aloud (target **~90s**) — **tight but not thin**: add **one concrete detail** on main beats when the headline gives you something real (a number, vendor, mechanism, “what they found”) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
+- **Banned hype / podcast clichés (ON AIR and social — never say or echo):** “hold on to your hat(s),” “buckle up,” “deep dive,” “let’s dive in,” “fire hose,” “grab your popcorn,” “you won’t believe,” “crazy,” “insane” (unless the headline literally uses it), or **any** “fasten your seatbelts” style padding. Sound like a colleague at the bench, not a trailer voice.
+- **Local business (every episode):** The ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block). That line is **not** filler — **include it** even on tight ~90s reads.
 
 You are writing for a **small professional studio**: one column is the **video / post prompt** (for Final Cut), the other is **on-air copy** (teleprompter / VO only).
 
 ${segmentOrderBlock}
 ${localColorBlock}
 
-**LOCKSTEP + COLUMN A — VIDEO PROMPT (source screenshots only):**
+**LOCKSTEP + COLUMN A — VIDEO PROMPT (plain text for editors — not read on camera, no Markdown):**
+- **No Markdown or markup:** Do **not** use \`#\`, \`##\`, \`**bold**\`, bullet lists with \`-\` / \`*\`, or code fences. Use **plain text** only (easy to copy into email, Notion, etc.).
 - **Visuals:** You use **only** the **source screenshots** attached to the email (one JPEG per covered story). By default they are **full mobile viewport grabs** (phone-shaped frame: site chrome + headline + fold of the article — same idea as a normal screen recording still; ~393×852 CSS px unless overridden). **Do not** call for stock footage, extra B-roll, additional stills you didn’t list, or “add clips.” Every visual is a **site grab** tied to a **story number** from the list above.
 - ${parityStories}. Same order as on air (${beatOrderPhrase}); nothing extra in either column.
-- **Short Markdown only** (editor notes — **not** read on camera): one \`#\` show title line, one \`##\` per **news** story (heading = story headline), then \`## Close\` for **Linden Hills + soldering sign-off** (no matching story number in <<<SOURCES>>>).
-- Under each **news** \`##\`: **2 bullets max**:
-  - **SCREENSHOT** — name the **story number** (e.g. “**Story 3** from today’s list — first slide / first grab in email order”).
-  - **NOTE** — optional **in-timeline hint on this still only**: rough **hold length**, **hard cut** vs short **dissolve** to the **next email screenshot**, or **plain text** you type in the editor **on top of this JPEG** (title safe). **Do not** write notes that imply **any other media** — no B-roll, stock, extra stills, screen caps you didn’t attach, second angles, “film cutaways,” or “add shots.” Slides = **these JPEGs only**.
-- **Close** section: **NOTE** bullets only (no fake SCREENSHOT) — e.g. stay on last story still through sign-off, or fade out; still **no** new footage assets.
+- **Structure (plain text):**
+  - **Line 1:** Short **show title** (plain, no symbols).
+  - **Each news story:** A line containing only the word **STORY** (all caps). Next line: **story headline** (one line, matches the beat). Next lines: a line starting with **SCREENSHOT:** (which story number + slide order), then optional lines starting with **NOTE:** (hold, cut, on-still text — timeline only; no extra media). Blank line between stories is OK.
+  - **After the last news story:** A line containing only **CLOSE**. Then **NOTE:** lines only for Linden Hills / **${localBizName}** on-camera reminder + stay-on-still / fade (see LINDEN HILLS block). No SCREENSHOT in CLOSE.
 - **Forbidden in this column:** **B-ROLL**, **STOCK**, **CAM** (extra camera clips), “film B-roll,” “lower third pack,” “insert clip,” or any wording that implies files beyond the **attached screenshots** (text you type in the timeline is OK).
 
 ---
 
 **COLUMN B — ON AIR (teleprompter / voiceover — spoken words only):**
 - **ALL CAPS.** Each story is **2–4 short lines** max: headline essence + **why it matters** + **one concrete detail** when the source headline supports it (stat, layer, product name — **skip** the detail if it forces wordiness). No long paragraphs, no recap of the whole web.
-- **Single continuous take** — write so it flows straight through after the open; no “first story / next up / finally” padding.
+- **Single continuous take** — write so it flows straight through after the open; no “first story / next up / finally” padding; **no** “hold on to your hats,” **no** “deep dive,” **no** “buckle up” or similar.
 - **Do not** put [B-ROLL] or shot notes here — VIDEO PROMPT only.
 - START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
 - **Enunciation (INLINE):** phonetic in parentheses **on first mention only** next to the word — short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye). Real acronyms spelled: A I, G P U.
-- **Close:** You **must** say **${localBizName}** once, naturally (see neighborhood block). Never **shoutout**, **shout-out**, **plug**, or hard-sell.
-- END exactly: BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
+- **Close:** After your last **news** beat, **before** the two fixed END lines: one or two **ALL CAPS** lines mixing **Linden Hills** color with **${localBizName}** spoken **once** by name (required — see LINDEN HILLS block). Never **shoutout**, **shout-out**, **plug**, or hard-sell.
+- END exactly (literal, final two sentences of ON AIR): BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
 
 ---
 
 **OUTPUT FORMAT (exactly four blocks, in this order — use these marker lines literally):**
 
 <<<VIDEO_PROMPT>>>
-(Markdown: \`#\` + \`##\` per story + \`## Close\`; each news \`##\` has **SCREENSHOT** + optional **NOTE** [timeline/text-on-still only, **no** extra B-roll or clips]; match ON_AIR order, ${beatOrderPhrase}.)
+(Plain text: show title on line 1; then **STORY** / headline / **SCREENSHOT:** / **NOTE:** per news story; then **CLOSE** + **NOTE:** only. No Markdown. Match ON_AIR order, ${beatOrderPhrase}.)
 
 <<<ON_AIR>>>
-(ALL CAPS — one take, **~85–100s** (~**90s**); same story order as VIDEO_PROMPT.)
+(ALL CAPS — one take, **~85–100s** (~**90s**); same story order as VIDEO_PROMPT; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
 
 <<<SOURCES>>>
 (Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** at the top — e.g. \`2,5,7\` = story **2**, then **5**, then **7**. **Order = slide order** = order of JPEGs in the email: first number = first slide / first grab.)
@@ -855,7 +858,7 @@ ${localColorBlock}
       ? 'SOURCE LINKS (for this segment — screenshots / posts)'
       : 'SOURCE LINKS (none parsed — see log)';
 
-  const videoHeader = 'VIDEO PROMPT — Markdown (edit / Final Cut / post)';
+  const videoHeader = 'VIDEO PROMPT — plain text (edit / Final Cut / post)';
   const onAirHeader = 'ON AIR (teleprompter / VO)';
   const socialHeader =
     'SOCIAL — Tech News Daily with Kyle (video caption / description)';
@@ -939,7 +942,7 @@ ${localColorBlock}
       ...(instakyleNewsDir ? { instakyleNewsDir } : {}),
       tickerLine,
       socialCaption,
-      videoPromptMarkdown: videoPrompt.trim(),
+      videoPrompt: videoPrompt.trim(),
       onAirPlain: fixedOnAir.trim(),
       stories: webStories,
       videoUrl: techNewsVideoUrl,
