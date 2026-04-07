@@ -3,6 +3,7 @@ import { parseFeedUrl } from './feed';
 import {
   buildEpisodeVerificationToken,
   chicagoDateSlug,
+  getChicagoEpisodeNow,
 } from './web_publish';
 import { Resend } from 'resend';
 import { LOCAL_INTERSECTION_CENTER, pickLocalBusiness } from './local_businesses';
@@ -922,7 +923,7 @@ ${localColorBlock}
   const { data: sendData, error: sendErr } = await resend.emails.send({
     from,
     to,
-    subject: `📺 Your News Script for ${new Date().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}${attachments?.length ? ' 📎' : ''}`,
+    subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}${attachments?.length ? ' 📎' : ''}`,
     text: emailText,
     html: emailHtml,
     ...(attachments?.length ? { attachments } : {}),

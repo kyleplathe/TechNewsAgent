@@ -8,7 +8,12 @@ name: Daily Tech News Agent
     # GitHub cron is UTC only. 0 10 * * * ≈ 5:00 AM America/Chicago during CDT (roughly Mar–Nov).
     # During CST (winter) the same cron is ≈ 4:00 AM Chicago — switch to 0 11 * * * for ~5:00 AM CST (then ~6:00 AM CDT).
     - cron: '0 10 * * *'
-  workflow_dispatch: # Allows you to run it manually for testing
+  workflow_dispatch:
+    inputs:
+      chicago_date:
+        description: 'Episode date YYYY-MM-DD (America/Chicago); leave empty for “today”. Use to backfill posts.'
+        required: false
+        type: string
 
 # `contents: read` alone makes every other scope `none`, which blocks artifact upload.
 permissions:
@@ -104,6 +109,8 @@ jobs:
           TECHNEWS_INSTAKYLE_NEWS_DIR: ${{ steps.instakyle_news.outputs.dir }}
           TECHNEWS_SITE_ORIGIN: ${{ vars.TECHNEWS_SITE_ORIGIN }}
           TECHNEWS_VIDEO_URL: ${{ secrets.TECHNEWS_VIDEO_URL }}
+          # Only set when manually dispatched (empty on schedule / push).
+          TECHNEWS_CHICAGO_DATE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.chicago_date || '' }}
         run: npx tsx tech_news_agent.ts
 
       - name: Upload news-site-bundle artifact
@@ -122,7 +129,10 @@ jobs:
         working-directory: instakyle-site
         run: |
           set -e
-          SLUG=$(TZ=America/Chicago date +%Y-%m-%d)
+          SLUG='${{ github.event_name == 'workflow_dispatch' && github.event.inputs.chicago_date || '' }}'
+          if [ -z "$SLUG" ] || [ "$SLUG" = "null" ]; then
+            SLUG=$(TZ=America/Chicago date +%Y-%m-%d)
+          fi
           BRANCH=$(git rev-parse --abbrev-ref HEAD)
           git fetch origin "$BRANCH"
           if [ "${FORCE_REPUBLISH}" != "true" ] && git cat-file -e "origin/${BRANCH}:public/news/posts/${SLUG}.json" 2>/dev/null; then

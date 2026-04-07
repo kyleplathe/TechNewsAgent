@@ -165,8 +165,53 @@ function joinUrl(base: string, rel: string): string {
   return `${b}/${r}`;
 }
 
-/** YYYY-MM-DD in America/Chicago (episode day). */
+/** A `Date` somewhere on Chicago calendar day `slug` (for formatting). */
+function chicagoNoonOnSlugDay(slug: string): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(slug)) {
+    throw new Error(`chicagoNoonOnSlugDay: invalid slug "${slug}"`);
+  }
+  const [ys, ms, ds] = slug.split('-');
+  const y = Number(ys);
+  const mo = Number(ms);
+  const da = Number(ds);
+  const dayFmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const target = `${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}`;
+  const start = Date.UTC(y, mo - 1, da, 0, 0, 0);
+  for (let h = 0; h < 48; h++) {
+    const dt = new Date(start + h * 3600000);
+    if (dayFmt.format(dt) === target) {
+      return dt;
+    }
+  }
+  return new Date(start + 12 * 3600000);
+}
+
+/**
+ * “Now” for episode dating: real clock, or anchor for `TECHNEWS_CHICAGO_DATE` backfill.
+ */
+export function getChicagoEpisodeNow(): Date {
+  const fromEnv = process.env.TECHNEWS_CHICAGO_DATE?.trim();
+  if (fromEnv && /^\d{4}-\d{2}-\d{2}$/.test(fromEnv)) {
+    return chicagoNoonOnSlugDay(fromEnv);
+  }
+  return new Date();
+}
+
+/**
+ * YYYY-MM-DD in America/Chicago (episode day).
+ * Set **`TECHNEWS_CHICAGO_DATE=YYYY-MM-DD`** to backfill that calendar day’s slug / token
+ * (workflow_dispatch or local); otherwise uses `d` (default: current instant).
+ */
 export function chicagoDateSlug(d = new Date()): string {
+  const fromEnv = process.env.TECHNEWS_CHICAGO_DATE?.trim();
+  if (fromEnv && /^\d{4}-\d{2}-\d{2}$/.test(fromEnv)) {
+    return fromEnv;
+  }
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Chicago',
     year: 'numeric',
@@ -283,7 +328,8 @@ export async function writeTechNewsWebBundle(
   }
 
   const tz = 'America/Chicago';
-  const displayDate = new Date().toLocaleDateString('en-US', {
+  const episodeNow = getChicagoEpisodeNow();
+  const displayDate = episodeNow.toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'short',
     day: 'numeric',
@@ -291,9 +337,9 @@ export async function writeTechNewsWebBundle(
     timeZone: tz,
   });
 
-  const slug = chicagoDateSlug();
+  const slug = chicagoDateSlug(episodeNow);
   const episodeVerificationToken = buildEpisodeVerificationToken(slug);
-  const shortTitleDate = new Date().toLocaleDateString('en-US', {
+  const shortTitleDate = episodeNow.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

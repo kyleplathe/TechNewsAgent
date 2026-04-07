@@ -47,6 +47,9 @@ Target **one take ~85–100s** (~**90s**). Best practice for a **daily reporter*
 
 With **`INSTAKYLE_PUSH_TOKEN`** set, the workflow checks out **Instakyle-clean** (to seed **`manifest.json`** when needed), runs the agent, then always uploads a **`news-site-bundle`** artifact (retention 5 days). Episode JSON includes **`sourceWorkflowRunId`** / **`sourceWorkflowRunUrl`** so you can match **instakyle.tech/news** to the exact Actions run (and the email from that run).
 
+**Backfill several days (e.g. April 1–7)**  
+Run **Daily Tech News Agent** from **Actions → Run workflow** seven times (or once per missing day). Set optional input **`chicago_date`** to each **`YYYY-MM-DD`** in Chicago. Each run regenerates that day’s feeds/Gemini output and writes **`posts/{slug}.json`** (full agent cost per day). If a slug **already exists** on Instakyle and you mean to replace it, set **`NEWS_SITE_FORCE_REPUBLISH=true`** for that run. Locally: `TECHNEWS_CHICAGO_DATE=2026-04-01 npx tsx tech_news_agent.ts` (still need Resend + web dirs as usual).  
+
 **One live post per Chicago day (auto push)**  
 If **`public/news/posts/YYYY-MM-DD.json`** already exists on the Instakyle default branch, the **auto** push step **skips** (no second post for the same calendar day). Set repository variable **`NEWS_SITE_FORCE_REPUBLISH=true`** on a rerun to replace that day’s files.
 

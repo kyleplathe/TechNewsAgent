@@ -71,7 +71,16 @@ jobs:
         working-directory: instakyle-site
         run: |
           set -e
-          SLUG=$(TZ=America/Chicago date +%Y-%m-%d)
+          shopt -s nullglob
+          posts=(../bundle/posts/*.json)
+          if [ ${#posts[@]} -eq 0 ]; then
+            echo "No posts/*.json in artifact bundle."
+            exit 1
+          fi
+          SLUG=$(basename "${posts[0]}" .json)
+          if [ ${#posts[@]} -gt 1 ]; then
+            echo "Warning: multiple post JSON files in bundle; using first slug ${SLUG}"
+          fi
           BRANCH=$(git rev-parse --abbrev-ref HEAD)
           git fetch origin "$BRANCH"
           if [ "${{ inputs.force_replace_today }}" != "true" ]; then
