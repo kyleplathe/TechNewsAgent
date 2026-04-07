@@ -79,6 +79,23 @@
       margin: 0.5rem 0 0;
     }
     .notes:empty { display: none; }
+    .yt-wrap { margin-bottom: 1.75rem; }
+    .yt-wrap .yt-inner {
+      position: relative;
+      padding-bottom: 56.25%;
+      height: 0;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #000;
+    }
+    .yt-wrap iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
     a.source {
       display: inline-block;
       margin-top: 0.65rem;
@@ -98,6 +115,7 @@
     <h1 id="title">Tech News Daily</h1>
     <p class="date" id="date"></p>
     <div class="ticker" id="ticker" hidden></div>
+    <div id="yt-wrap" hidden></div>
     <div id="stories"></div>
     <footer id="foot"></footer>
   </div>
@@ -110,6 +128,29 @@
 
       function showError(msg) {
         root.innerHTML = '<p class="err" role="alert">' + msg + '</p>';
+      }
+
+      function youtubeIdFromData(d) {
+        if (d.youtubeVideoId && /^[\w-]{11}$/.test(String(d.youtubeVideoId))) {
+          return String(d.youtubeVideoId);
+        }
+        var u = d.videoUrl;
+        if (!u || typeof u !== 'string') return null;
+        try {
+          var url = new URL(u);
+          var host = url.hostname.replace(/^www\./i, '');
+          if (host === 'youtu.be') {
+            var be = url.pathname.slice(1).split('/')[0];
+            if (/^[\w-]{11}$/.test(be)) return be;
+          }
+          if (host.indexOf('youtube.com') !== -1) {
+            var v = url.searchParams.get('v');
+            if (v && /^[\w-]{11}$/.test(v)) return v;
+            var m = url.pathname.match(/\/(?:shorts|embed)\/([\w-]{11})/);
+            if (m) return m[1];
+          }
+        } catch (e) {}
+        return null;
       }
 
       fetch('latest.json', { cache: 'no-store' })
@@ -126,6 +167,16 @@
           if (data.tickerLine) {
             tickerEl.textContent = data.tickerLine;
             tickerEl.hidden = false;
+          }
+          var ytId = youtubeIdFromData(data);
+          var ytWrap = document.getElementById('yt-wrap');
+          if (ytId && ytWrap) {
+            ytWrap.hidden = false;
+            ytWrap.className = 'yt-wrap';
+            ytWrap.innerHTML =
+              '<div class="yt-inner"><iframe src="https://www.youtube-nocookie.com/embed/' +
+              ytId +
+              '" title="Episode video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>';
           }
           var frag = document.createDocumentFragment();
           data.stories.forEach(function (s) {

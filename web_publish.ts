@@ -39,6 +39,10 @@ export type TechNewsWebPayload = {
   displayDate: string;
   /** Optional link to the day’s video (YouTube, Instagram, etc.) */
   videoUrl?: string | null;
+  /** 11-char id after YouTube verify sync — used for embed */
+  youtubeVideoId?: string | null;
+  /** Must appear in YouTube description for automated sync */
+  episodeVerificationToken?: string | null;
   /** Set in GitHub Actions — ties the episode JSON to the workflow run that built it */
   sourceWorkflowRunId?: string | null;
   sourceWorkflowRunUrl?: string | null;
@@ -171,6 +175,39 @@ export function chicagoDateSlug(d = new Date()): string {
   }).format(d);
 }
 
+/**
+ * Paste into the YouTube Short / video description; **Verify YouTube and sync episode**
+ * checks `snippet.description` contains this exact string. Date-only so the same line stays valid
+ * if the daily agent re-runs (GitHub run id is not embedded).
+ */
+export function buildEpisodeVerificationToken(slug: string): string {
+  return `TND-${slug}`;
+}
+
+/** 11-char id from watch / shorts / embed URL or raw id. */
+export function extractYoutubeVideoId(input: string): string | null {
+  const u = input.trim();
+  if (!u) return null;
+  if (/^[\w-]{11}$/.test(u)) return u;
+  try {
+    const url = new URL(u);
+    const host = url.hostname.replace(/^www\./i, '');
+    if (host === 'youtu.be') {
+      const id = url.pathname.split('/').filter(Boolean)[0] ?? '';
+      return /^[\w-]{11}$/.test(id) ? id : null;
+    }
+    if (host.endsWith('youtube.com')) {
+      const v = url.searchParams.get('v');
+      if (v && /^[\w-]{11}$/.test(v)) return v;
+      const m = url.pathname.match(/\/(?:shorts|embed)\/([\w-]{11})/);
+      if (m?.[1]) return m[1];
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 async function readManifest(path: string): Promise<NewsManifest> {
   try {
     const raw = await readFile(path, 'utf8');
@@ -255,6 +292,7 @@ export async function writeTechNewsWebBundle(
   });
 
   const slug = chicagoDateSlug();
+  const episodeVerificationToken = buildEpisodeVerificationToken(slug);
   const shortTitleDate = new Date().toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -296,6 +334,19 @@ export async function writeTechNewsWebBundle(
   if (genericRoot) {
     const imagesDir = join(genericRoot, 'images');
     await mkdir(imagesDir, { recursive: true });
+    let prevLatest: Partial<TechNewsWebPayload> | null = null;
+    try {
+      prevLatest = JSON.parse(
+        await readFile(join(genericRoot, 'latest.json'), 'utf8')
+      ) as Partial<TechNewsWebPayload>;
+    } catch {
+      /* no prior bundle */
+    }
+    const mergedGenVideo =
+      (videoUrl && videoUrl.trim()) || prevLatest?.videoUrl || null;
+    const mergedGenYoutubeId =
+      prevLatest?.youtubeVideoId != null ? prevLatest.youtubeVideoId : null;
+
     const payloadStories: TechNewsWebPayload['stories'] = [];
 
     for (const b of built) {
@@ -323,7 +374,9 @@ export async function writeTechNewsWebBundle(
       schemaVersion: 1,
       publishedAt: new Date().toISOString(),
       displayDate,
-      videoUrl: videoUrl || null,
+      videoUrl: mergedGenVideo,
+      youtubeVideoId: mergedGenYoutubeId,
+      episodeVerificationToken,
       ...runMeta,
       tickerLine,
       socialCaption,
@@ -383,13 +436,27 @@ export async function writeTechNewsWebBundle(
       });
     }
 
+    const postPath = join(postsDir, `${slug}.json`);
+    let prevPost: Partial<TechNewsPostPayload> | null = null;
+    try {
+      prevPost = JSON.parse(await readFile(postPath, 'utf8')) as Partial<TechNewsPostPayload>;
+    } catch {
+      /* no prior post */
+    }
+    const mergedPostVideo =
+      (videoUrl && videoUrl.trim()) || prevPost?.videoUrl || null;
+    const mergedPostYoutubeId =
+      prevPost?.youtubeVideoId != null ? prevPost.youtubeVideoId : null;
+
     const runMeta = workflowRunMeta();
     const postPayload: TechNewsPostPayload = {
       schemaVersion: 1,
       slug,
       publishedAt: new Date().toISOString(),
       displayDate,
-      videoUrl: videoUrl || null,
+      videoUrl: mergedPostVideo,
+      youtubeVideoId: mergedPostYoutubeId,
+      episodeVerificationToken,
       ...runMeta,
       tickerLine,
       socialCaption,
@@ -398,11 +465,7 @@ export async function writeTechNewsWebBundle(
       stories: postStories,
     };
 
-    await writeFile(
-      join(postsDir, `${slug}.json`),
-      JSON.stringify(postPayload, null, 2),
-      'utf8'
-    );
+    await writeFile(postPath, JSON.stringify(postPayload, null, 2), 'utf8');
 
     const manifestPath = join(instakyleRoot, 'manifest.json');
     const manifest = await readManifest(manifestPath);
@@ -411,7 +474,7 @@ export async function writeTechNewsWebBundle(
       displayDate,
       title: listTitle,
       publishedAt: postPayload.publishedAt,
-      videoUrl: videoUrl || null,
+      videoUrl: mergedPostVideo,
     };
     manifest.items = [
       entry,

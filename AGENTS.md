@@ -25,7 +25,7 @@ Items **without a parseable `pubDate` / Atom date** are **dropped** unless `ALLO
 
 ## Email layout (precision)
 
-Order: **Ticker** → **VIDEO PROMPT** (plain text, no Markdown) → **ON AIR** (ALL CAPS) → **SOCIAL** caption → **SOURCE LINKS** → screenshot note + attachments.
+Order: **Ticker** → **VIDEO PROMPT** (plain text, no Markdown) → **ON AIR** (ALL CAPS) → **SOCIAL** caption → **YOUTUBE** (one-line `TND-YYYY-MM-DD` token — paste into the Short’s **description** so **Verify YouTube and sync episode** can match the upload to that day’s post) → **SOURCE LINKS** → screenshot note + attachments.
 
 Markers in model output: `<<<VIDEO_PROMPT>>>`, `<<<ON_AIR>>>`, `<<<SOURCES>>>` (one line of comma-separated 1-based story numbers = same numbers as the **numbered list** in the prompt = **slide / JPEG order**), then `<<<SOCIAL>>>` (short Threads-style body; the script prepends the title line and hashtags).
 
@@ -63,6 +63,15 @@ If **`public/news/posts/YYYY-MM-DD.json`** already exists on the Instakyle defau
 | `NEWS_SITE_FORCE_REPUBLISH` | Optional | `true` to allow replacing today’s post on auto push. |
 | `TECHNEWS_SITE_ORIGIN` | Optional | e.g. `https://instakyle.tech` — absolute `imageUrl` in post JSON. |
 | `TECHNEWS_VIDEO_URL` | Optional secret | That day’s video link on the post page. |
+| `YOUTUBE_API_KEY` | For **Verify YouTube and sync episode** | Google Cloud: enable **YouTube Data API v3**, restrict key to that API. Repo **Actions secret**; used only to read `videos.list` **snippet.description**. |
+
+**YouTube embed + verified link**
+
+- Post JSON from `web_publish` includes **`episodeVerificationToken`** (`TND-{Chicago slug}`) and, after sync, **`youtubeVideoId`** + **`videoUrl`**. Re-running the daily agent the same day **preserves** synced `youtubeVideoId` / `videoUrl` when `TECHNEWS_VIDEO_URL` is unset.
+- **`web/technews.html`** shows a responsive embed when `youtubeVideoId` or a parseable `videoUrl` is present.
+- Workflow **Verify YouTube and sync episode**: **Actions → Run workflow** → paste the Short URL → needs **`YOUTUBE_API_KEY`** and **`INSTAKYLE_PUSH_TOKEN`**. Upload to YouTube remains manual unless you add OAuth upload yourself.
+
+Local: `YOUTUBE_API_KEY=... npm run youtube:sync -- --youtube-url "…" --news-dir /path/to/public/news`
 
 ## Secrets / env
 

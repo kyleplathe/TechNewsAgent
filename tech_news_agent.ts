@@ -1,5 +1,9 @@
 import 'dotenv/config';
 import { parseFeedUrl } from './feed';
+import {
+  buildEpisodeVerificationToken,
+  chicagoDateSlug,
+} from './web_publish';
 import { Resend } from 'resend';
 import { LOCAL_INTERSECTION_CENTER, pickLocalBusiness } from './local_businesses';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -862,6 +866,9 @@ ${localColorBlock}
   const onAirHeader = 'ON AIR (teleprompter / VO)';
   const socialHeader =
     'SOCIAL — Tech News Daily with Kyle (video caption / description)';
+  const ytVerifyHeader =
+    'YOUTUBE — paste this exact line in the video description (proves which episode this Short is for)';
+  const ytVerifyLine = buildEpisodeVerificationToken(chicagoDateSlug());
 
   const tickerHtml =
     `<div style="margin:0 0 1.25em;padding:14px 16px;background:#f4f4f5;border-radius:8px;border:1px solid #e4e4e7">` +
@@ -885,6 +892,9 @@ ${localColorBlock}
     socialHeader,
     socialCaption,
     '',
+    ytVerifyHeader,
+    ytVerifyLine,
+    '',
     linksHeader,
     '',
     linksText || '(none)',
@@ -902,6 +912,8 @@ ${localColorBlock}
     `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd">${escapeHtml(fixedOnAir.trim())}</pre>` +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(socialHeader)}</p>` +
     socialCaptionHtml +
+    `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(ytVerifyHeader)}</p>` +
+    `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.25em;padding:12px;background:#fefce8;border-radius:8px;border:1px solid #eab308;user-select:all;-webkit-user-select:all">${escapeHtml(ytVerifyLine)}</pre>` +
     `<p style="font-size:12px;font-weight:700;color:#444;margin:0 0 0.5em">${escapeHtml(linksHeader)}</p>` +
     `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.45">${linksHtml}</div>` +
     screenshotBannerHtml +

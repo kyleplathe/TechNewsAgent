@@ -1,0 +1,72 @@
+# After you upload a Short, run this with the watch or shorts URL. It checks the video
+# description for the day's episodeVerificationToken (from the morning email), then
+# commits videoUrl + youtubeVideoId on Instakyle public/news.
+
+name: Verify YouTube and sync episode
+
+'on':
+  workflow_dispatch:
+    inputs:
+      youtube_url:
+        description: 'Full YouTube URL (watch, shorts, or youtu.be)'
+        required: true
+        type: string
+      slug:
+        description: 'Episode slug YYYY-MM-DD (Chicago); leave empty for today'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout TechNewsAgent
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Checkout Instakyle
+        uses: actions/checkout@v6
+        with:
+          repository: kyleplathe/Instakyle-clean
+          path: instakyle-site
+          token: ${{ secrets.INSTAKYLE_PUSH_TOKEN }}
+
+      - name: Verify description and update post JSON
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: |
+          set -e
+          ARGS=( --youtube-url "${{ inputs.youtube_url }}" --news-dir "${GITHUB_WORKSPACE}/instakyle-site/public/news" )
+          if [ -n "${{ inputs.slug }}" ]; then
+            ARGS+=( --slug "${{ inputs.slug }}" )
+          fi
+          npx tsx scripts/youtube-verify-and-sync.ts "${ARGS[@]}"
+
+      - name: Commit and push Instakyle
+        working-directory: instakyle-site
+        run: |
+          set -e
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/news/posts public/news/manifest.json
+          if git diff --staged --quiet; then
+            echo "No changes."
+            exit 0
+          fi
+          git commit -m "chore(news): sync YouTube link after verify"
+          git push origin HEAD

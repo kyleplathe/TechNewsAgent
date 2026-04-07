@@ -7,7 +7,8 @@
   },
   "scripts": {
     "start": "tsx tech_news_agent.ts",
-    "test:email": "tsx scripts/test-email.ts"
+    "test:email": "tsx scripts/test-email.ts",
+    "youtube:sync": "tsx scripts/youtube-verify-and-sync.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
