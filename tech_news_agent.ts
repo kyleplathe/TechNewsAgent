@@ -328,21 +328,63 @@ async function writeAirLog(path: string, entries: AirLogEntry[]): Promise<void> 
   await writeFile(path, JSON.stringify(entries, null, 2), 'utf8');
 }
 
-function reorderIndicesByScriptMention(
+function hostFirstLabels(link: string): string[] {
+  try {
+    const h = new URL(link).hostname.replace(/^www\./i, '').toLowerCase();
+    const parts = h.split('.').filter(Boolean);
+    if (parts.length < 1) return [];
+    const out: string[] = [];
+    const head = parts[0];
+    if (head.length >= 3) out.push(head);
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * First word position in normalized ON AIR (0-based). Lower = earlier in the VO.
+ * Uses hostname label + title tokens so order tracks what you said, not necessarily `<<<SOURCES>>>`.
+ */
+function firstMentionWordIndex(c: Collected, onAirWords: string[]): number {
+  const candidates = new Set<string>();
+  for (const h of hostFirstLabels(c.link)) candidates.add(h);
+
+  for (const w of titleFingerprint(c.title).split(' ')) {
+    if (w.length >= 3) candidates.add(w);
+  }
+  for (const w of normalizeText(c.title).split(' ')) {
+    if (w.length >= 4) candidates.add(w);
+  }
+
+  let best = Number.MAX_SAFE_INTEGER;
+  for (const cand of candidates) {
+    const idx = onAirWords.indexOf(cand);
+    if (idx >= 0 && idx < best) best = idx;
+  }
+  return best;
+}
+
+/** Reorder selected story indices to match spoken order in ON AIR (stable for ties). */
+function reorderIndicesToMatchOnAir(
   indices: number[],
   collected: Collected[],
-  onAir: string,
-  videoPrompt: string
+  onAir: string
 ): number[] {
-  const combined = normalizeText(`${onAir}\n${videoPrompt}`);
-  const positions = indices.map((idx) => {
-    const c = collected[idx - 1];
-    if (!c) return { idx, pos: Number.MAX_SAFE_INTEGER };
-    const key = titleFingerprint(c.title).split(' ').slice(0, 4).join(' ');
-    const pos = key ? combined.indexOf(key) : -1;
-    return { idx, pos: pos >= 0 ? pos : Number.MAX_SAFE_INTEGER };
+  const onAirWords = normalizeText(onAir).split(/\s+/).filter(Boolean);
+  const decorated = indices.map((idx, orderInSources) => ({
+    idx,
+    wordIdx: (() => {
+      const c = collected[idx - 1];
+      return c ? firstMentionWordIndex(c, onAirWords) : Number.MAX_SAFE_INTEGER;
+    })(),
+    orderInSources,
+  }));
+  decorated.sort((a, b) => {
+    if (a.wordIdx !== b.wordIdx) return a.wordIdx - b.wordIdx;
+    return a.orderInSources - b.orderInSources;
   });
-  return positions.sort((a, b) => a.pos - b.pos).map((p) => p.idx);
+  return decorated.map((d) => d.idx);
 }
 
 /** Default on; set SCREENSHOT_SOURCES=0 to skip Playwright (faster local runs / no browser install). */
@@ -702,20 +744,14 @@ ${localColorBlock}
 
   const fixedOnAir = finalScript.trim();
   /**
-   * Email, screenshots, and blog `stories` follow this order. Default: **exact `<<<SOURCES>>>`**
-   * line order (= slide / read order the model was asked for). Optional
-   * `REORDER_SOURCES_BY_SCRIPT_MENTION=1` re-sorts by title-token hits in ON AIR + VIDEO PROMPT
-   * (fragile when VO paraphrases headlines — can scramble the list vs teleprompter).
+   * Email, screenshots, and blog `stories` follow ON AIR order: we re-sort the `<<<SOURCES>>>`
+   * indices by first match of hostname / title tokens in the normalized ON AIR text.
+   * Set **`USE_SOURCES_LINE_ORDER=1`** to keep the model’s `<<<SOURCES>>>` line order instead.
    */
   const orderedIndices =
-    process.env.REORDER_SOURCES_BY_SCRIPT_MENTION?.trim() === '1'
-      ? reorderIndicesByScriptMention(
-          indices,
-          collected,
-          fixedOnAir,
-          videoPrompt
-        )
-      : indices;
+    process.env.USE_SOURCES_LINE_ORDER?.trim() === '1'
+      ? indices
+      : reorderIndicesToMatchOnAir(indices, collected, fixedOnAir);
 
   const used = orderedIndices
     .map((i) => collected[i - 1])

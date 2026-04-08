@@ -42,29 +42,65 @@ jobs:
       - name: Checkout (for gh + context)
         uses: actions/checkout@v6
 
+      # Daily only uploads `news-site-bundle` when INSTAKYLE_PUSH_TOKEN was set (non-empty news dir).
+      # Picks the newest successful Daily run that actually has this artifact (avoids "artifact not found").
       - name: Resolve source workflow run
         id: src
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          ART_NAME="news-site-bundle"
+
+          has_bundle_artifact() {
+            local rid="$1"
+            gh api "repos/${REPO}/actions/runs/${rid}/artifacts" --paginate \
+              --jq '.artifacts[].name' 2>/dev/null | grep -qx "$ART_NAME"
+          }
+
           if [ -n "${{ inputs.source_run_id }}" ]; then
-            echo "run_id=${{ inputs.source_run_id }}" >> "$GITHUB_OUTPUT"
+            RID="${{ inputs.source_run_id }}"
+            if ! has_bundle_artifact "$RID"; then
+              echo "::error::Run ${RID} has no artifact \"${ART_NAME}\"."
+              echo "That usually means Daily ran without INSTAKYLE_PUSH_TOKEN (bundle never uploaded), the artifact expired (5-day retention), or the run ID is wrong."
+              echo "Fix: run Daily Tech News Agent successfully with PAT set, open that run → Artifacts → confirm ${ART_NAME}, then publish again (or pass that run's ID as source_run_id)."
+              exit 1
+            fi
+            echo "run_id=${RID}" >> "$GITHUB_OUTPUT"
+            echo "Using workflow run (manual): ${RID}"
             exit 0
           fi
-          RID=$(gh run list \
-            --repo "${{ github.repository }}" \
+
+          RUN_IDS=$(gh run list \
+            --repo "${REPO}" \
             --workflow=daily_news.yml \
             --status=success \
-            --limit=1 \
+            --limit=30 \
             --json databaseId \
-            -q '.[0].databaseId')
-          if [ -z "$RID" ] || [ "$RID" = "null" ]; then
-            echo "No successful Daily Tech News Agent run found."
+            -q '.[].databaseId' | tr '\n' ' ')
+          if [ -z "${RUN_IDS}" ]; then
+            echo "::error::No successful Daily Tech News Agent runs found."
             exit 1
           fi
-          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
-          echo "Using workflow run: $RID"
+
+          RID=""
+          for cand in ${RUN_IDS}; do
+            if has_bundle_artifact "${cand}"; then
+              RID="${cand}"
+              break
+            fi
+          done
+
+          if [ -z "${RID}" ]; then
+            echo "::error::No recent successful Daily run has artifact \"${ART_NAME}\" (checked last 30)."
+            echo "Daily only uploads this artifact when INSTAKYLE_PUSH_TOKEN is configured (see workflow \"Resolve news output directory\")."
+            echo "Fix: run Daily Tech News Agent again with the secret set, wait for success, then run this workflow."
+            exit 1
+          fi
+
+          echo "run_id=${RID}" >> "$GITHUB_OUTPUT"
+          echo "Using workflow run (newest Daily with ${ART_NAME}): ${RID}"
 
       - name: Download news-site-bundle artifact
         uses: actions/download-artifact@v4

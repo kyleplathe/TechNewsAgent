@@ -27,7 +27,9 @@ Items **without a parseable `pubDate` / Atom date** are **dropped** unless `ALLO
 
 Order: **Ticker** → **VIDEO PROMPT** (plain text, no Markdown) → **ON AIR** (ALL CAPS) → **SOCIAL** caption → **YOUTUBE** (one-line `TND-YYYY-MM-DD` token — paste into the Short’s **description** so **Publish Tech News to Instakyle** can verify + sync the upload) → **SOURCE LINKS** → screenshot note + attachments.
 
-Markers in model output: `<<<VIDEO_PROMPT>>>`, `<<<ON_AIR>>>`, `<<<SOURCES>>>` (one line of comma-separated 1-based story numbers = same numbers as the **numbered list** in the prompt = **slide / JPEG order**), then `<<<SOCIAL>>>` (short Threads-style body; the script prepends the title line and hashtags).
+Markers in model output: `<<<VIDEO_PROMPT>>>`, `<<<ON_AIR>>>`, `<<<SOURCES>>>` (one line of comma-separated 1-based story numbers = same numbers as the **numbered list** in the prompt — **which** stories are in the segment), then `<<<SOCIAL>>>` (short Threads-style body; the script prepends the title line and hashtags).
+
+**SOURCE LINKS / blog row order (default):** those indices are **re-sorted to match `<<<ON_AIR>>>`** by earliest mention of each story’s link hostname and title tokens (normalized), so the list tracks **spoken order**, not necessarily the comma order in `<<<SOURCES>>>`. Set **`USE_SOURCES_LINE_ORDER=1`** (repo variable or env) to keep the model’s `<<<SOURCES>>>` line order verbatim instead.
 
 If the email looks truncated or missing a column, check Gemini `maxOutputTokens` and API errors; markers must be exact.
 
@@ -73,14 +75,14 @@ If **`public/news/posts/YYYY-MM-DD.json`** already exists on the Instakyle defau
 
 - Post JSON from `web_publish` includes **`episodeVerificationToken`** (`TND-{Chicago slug}`) and, after sync, **`youtubeVideoId`** + **`videoUrl`**. Re-running the daily agent the same day **preserves** synced `youtubeVideoId` / `videoUrl` when `TECHNEWS_VIDEO_URL` is unset.
 - **`web/technews.html`** shows a responsive embed when `youtubeVideoId` or a parseable `videoUrl` is present.
-- Workflow **Publish Tech News to Instakyle**: **Actions → Run workflow** after filming. Leave **`source_run_id`** empty for latest successful daily run. If `youtube_url` is blank, the workflow auto-searches YouTube by the `TND-YYYY-MM-DD` token (optionally constrained by `YOUTUBE_CHANNEL_ID`) and syncs when found; if not found yet, publish still completes and you can rerun later.
+- Workflow **Publish Tech News to Instakyle**: **Actions → Run workflow** after filming. Leave **`source_run_id`** empty for the workflow to pick the **newest successful Daily run that actually uploaded** `news-site-bundle` (older “green” Daily runs may have no artifact if **`INSTAKYLE_PUSH_TOKEN`** was still missing). If `youtube_url` is blank, it auto-searches YouTube by the `TND-YYYY-MM-DD` token (optionally constrained by **`YOUTUBE_CHANNEL_ID`**) and syncs when found; if not found yet, publish still completes and you can rerun later.
 
 Local (explicit URL): `YOUTUBE_API_KEY=... npm run youtube:sync -- --youtube-url "…" --news-dir /path/to/public/news`
 Local (auto-discover by token): `YOUTUBE_API_KEY=... npm run youtube:sync -- --news-dir /path/to/public/news --allow-missing`
 
 ## Secrets / env
 
-Resend, Gemini, `RESEND_TO`, optional `FEED_ITEM_LIMIT`, `SCREENSHOT_*`, `GEMINI_MODEL`, etc. Never commit `.env`.
+Resend, Gemini, `RESEND_TO`, optional `FEED_ITEM_LIMIT`, `SCREENSHOT_*`, `GEMINI_MODEL`, optional `USE_SOURCES_LINE_ORDER` (see **SOURCE LINKS / blog row order** above), etc. Never commit `.env`.
 
 ## TechNews web bundle (optional)
 
