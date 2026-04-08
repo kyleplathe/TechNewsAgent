@@ -1,5 +1,6 @@
-# Pushes the news bundle from a completed "Daily Tech News Agent" run to Instakyle.
-# Use when NEWS_SITE_PUBLISH_MODE=manual: run this after you film so instakyle.tech/news matches that morning's email/script.
+# One-button publish flow for the latest episode bundle.
+# Use when NEWS_SITE_PUBLISH_MODE=manual: run this after filming.
+# Optional YouTube URL or token auto-discovery verifies + syncs in the same run.
 
 name: Publish Tech News to Instakyle
 
@@ -15,6 +16,19 @@ name: Publish Tech News to Instakyle
         required: false
         type: boolean
         default: false
+      youtube_url:
+        description: 'Optional YouTube URL (watch/shorts/youtu.be) to verify + sync while publishing'
+        required: false
+        type: string
+      auto_find_youtube:
+        description: 'If true, auto-find YouTube by TND token when youtube_url is blank'
+        required: false
+        type: boolean
+        default: true
+      slug:
+        description: 'Optional episode slug YYYY-MM-DD for YouTube sync/search (defaults to bundle slug)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -60,6 +74,15 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ steps.src.outputs.run_id }}
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Checkout Instakyle
         uses: actions/checkout@v6
         with:
@@ -67,7 +90,8 @@ jobs:
           path: instakyle-site
           token: ${{ secrets.INSTAKYLE_PUSH_TOKEN }}
 
-      - name: Merge bundle into public/news and push
+      - name: Merge bundle into public/news
+        id: merge
         working-directory: instakyle-site
         run: |
           set -e
@@ -78,6 +102,7 @@ jobs:
             exit 1
           fi
           SLUG=$(basename "${posts[0]}" .json)
+          echo "bundle_slug=${SLUG}" >> "$GITHUB_OUTPUT"
           if [ ${#posts[@]} -gt 1 ]; then
             echo "Warning: multiple post JSON files in bundle; using first slug ${SLUG}"
           fi
@@ -90,12 +115,47 @@ jobs:
             fi
           fi
           rsync -a "${GITHUB_WORKSPACE}/bundle/" "public/news/"
+
+      - name: Verify YouTube and sync episode
+        if: ${{ inputs.youtube_url != '' || inputs.auto_find_youtube == true }}
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
+        run: |
+          set -e
+          SYNC_SLUG="${{ inputs.slug }}"
+          if [ -z "$SYNC_SLUG" ]; then
+            SYNC_SLUG="${{ steps.merge.outputs.bundle_slug }}"
+          fi
+          ARGS=( --news-dir "${GITHUB_WORKSPACE}/instakyle-site/public/news" )
+          if [ -n "${{ inputs.youtube_url }}" ]; then
+            ARGS+=( --youtube-url "${{ inputs.youtube_url }}" )
+          else
+            ARGS+=( --allow-missing )
+            if [ -n "${YOUTUBE_CHANNEL_ID}" ]; then
+              ARGS+=( --channel-id "${YOUTUBE_CHANNEL_ID}" )
+            fi
+          fi
+          if [ -n "$SYNC_SLUG" ]; then
+            ARGS+=( --slug "$SYNC_SLUG" )
+          fi
+          npx tsx scripts/youtube-verify-and-sync.ts "${ARGS[@]}"
+
+      - name: Commit and push Instakyle
+        working-directory: instakyle-site
+        run: |
+          set -e
+          SLUG="${{ steps.merge.outputs.bundle_slug }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/news
           if git diff --staged --quiet; then
             echo "No git changes (bundle matched tree)."
-          else
-            git commit -m "chore(news): publish Tech News episode (${SLUG})"
-            git push origin HEAD
+            exit 0
           fi
+          MSG="chore(news): publish Tech News episode (${SLUG})"
+          if [ -n "${{ inputs.youtube_url }}" ] || [ "${{ inputs.auto_find_youtube }}" = "true" ]; then
+            MSG="chore(news): publish + sync YouTube (${SLUG})"
+          fi
+          git commit -m "$MSG"
+          git push origin HEAD

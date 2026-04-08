@@ -2,9 +2,11 @@
  * Confirms a YouTube video description contains `episodeVerificationToken` from the
  * day’s post JSON, then writes `videoUrl` + `youtubeVideoId` and updates `manifest.json`.
  *
- *   YOUTUBE_API_KEY=... npx tsx scripts/youtube-verify-and-sync.ts --youtube-url "https://..."
- *     --news-dir /path/to/public/news
- *     [--slug YYYY-MM-DD]   # default: Chicago today
+ *   YOUTUBE_API_KEY=... npx tsx scripts/youtube-verify-and-sync.ts --news-dir /path/to/public/news
+ *     [--youtube-url "https://..."]   # optional; if omitted, auto-discovers by token
+ *     [--slug YYYY-MM-DD]              # default: Chicago today
+ *     [--channel-id UC...]             # optional filter for auto-discovery
+ *     [--allow-missing]                # return success when auto-discovery finds nothing
  */
 import 'dotenv/config';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -19,15 +21,22 @@ import {
 type VideosListResponse = {
   items?: Array<{ snippet?: { description?: string } }>;
 };
+type SearchListResponse = {
+  items?: Array<{ id?: { videoId?: string } }>;
+};
 
 function parseArgs(argv: string[]): {
-  youtubeUrl: string;
+  youtubeUrl: string | null;
   newsDir: string;
   slug: string | null;
+  channelId: string | null;
+  allowMissing: boolean;
 } {
-  let youtubeUrl = '';
+  let youtubeUrl: string | null = null;
   let newsDir = '';
   let slug: string | null = null;
+  let channelId: string | null = null;
+  let allowMissing = false;
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--youtube-url' && argv[i + 1]) {
@@ -36,9 +45,13 @@ function parseArgs(argv: string[]): {
       newsDir = argv[++i];
     } else if (a === '--slug' && argv[i + 1]) {
       slug = argv[++i];
+    } else if (a === '--channel-id' && argv[i + 1]) {
+      channelId = argv[++i];
+    } else if (a === '--allow-missing') {
+      allowMissing = true;
     }
   }
-  return { youtubeUrl, newsDir, slug };
+  return { youtubeUrl, newsDir, slug, channelId, allowMissing };
 }
 
 async function fetchDescription(
@@ -63,11 +76,41 @@ async function fetchDescription(
   return desc;
 }
 
+async function discoverVideoIdByToken(
+  token: string,
+  apiKey: string,
+  channelId: string | null
+): Promise<string | null> {
+  const u = new URL('https://www.googleapis.com/youtube/v3/search');
+  u.searchParams.set('part', 'snippet');
+  u.searchParams.set('type', 'video');
+  u.searchParams.set('order', 'date');
+  u.searchParams.set('maxResults', '8');
+  u.searchParams.set('q', token);
+  u.searchParams.set('key', apiKey);
+  if (channelId) u.searchParams.set('channelId', channelId);
+
+  const res = await fetch(u);
+  const data = (await res.json()) as SearchListResponse;
+  if (!res.ok) {
+    throw new Error(`YouTube search API ${res.status}: ${JSON.stringify(data)}`);
+  }
+  const ids = (data.items ?? [])
+    .map((it) => it.id?.videoId?.trim() || '')
+    .filter((id) => /^[\w-]{11}$/.test(id));
+  for (const id of ids) {
+    const desc = await fetchDescription(id, apiKey);
+    if (desc.includes(token)) return id;
+  }
+  return null;
+}
+
 async function main() {
-  const { youtubeUrl, newsDir, slug: slugArg } = parseArgs(process.argv);
-  if (!youtubeUrl || !newsDir) {
+  const { youtubeUrl, newsDir, slug: slugArg, channelId, allowMissing } =
+    parseArgs(process.argv);
+  if (!newsDir) {
     throw new Error(
-      'Usage: tsx scripts/youtube-verify-and-sync.ts --youtube-url <url> --news-dir <public/news> [--slug YYYY-MM-DD]'
+      'Usage: tsx scripts/youtube-verify-and-sync.ts --news-dir <public/news> [--youtube-url <url>] [--slug YYYY-MM-DD] [--channel-id UC...] [--allow-missing]'
     );
   }
   const apiKey = process.env.YOUTUBE_API_KEY?.trim();
@@ -76,10 +119,6 @@ async function main() {
   }
 
   const slug = slugArg?.trim() || chicagoDateSlug();
-  const videoId = extractYoutubeVideoId(youtubeUrl);
-  if (!videoId) {
-    throw new Error(`Could not parse YouTube video id from: ${youtubeUrl}`);
-  }
 
   const postPath = join(newsDir, 'posts', `${slug}.json`);
   const raw = await readFile(postPath, 'utf8');
@@ -96,6 +135,28 @@ async function main() {
     throw new Error(
       `${postPath} has no episodeVerificationToken — publish a fresh episode from the agent first.`
     );
+  }
+
+  let videoId: string | null = null;
+  if (youtubeUrl?.trim()) {
+    videoId = extractYoutubeVideoId(youtubeUrl);
+    if (!videoId) {
+      throw new Error(`Could not parse YouTube video id from: ${youtubeUrl}`);
+    }
+  } else {
+    videoId = await discoverVideoIdByToken(token, apiKey, channelId);
+    if (!videoId) {
+      if (allowMissing) {
+        console.log(
+          `No YouTube video found yet containing token "${token}"${channelId ? ` on channel ${channelId}` : ''}; skipping sync.`
+        );
+        return;
+      }
+      throw new Error(
+        `No YouTube video found containing token "${token}"${channelId ? ` on channel ${channelId}` : ''}.`
+      );
+    }
+    console.log(`Auto-discovered YouTube video id ${videoId} for token ${token}.`);
   }
 
   const description = await fetchDescription(videoId, apiKey);
