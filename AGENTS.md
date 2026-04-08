@@ -66,7 +66,8 @@ If **`public/news/posts/YYYY-MM-DD.json`** already exists on the Instakyle defau
 | `INSTAKYLE_PUSH_TOKEN` | For site + artifact | PAT on **Instakyle-clean** (contents read/write). Omit for **email-only** CI. |
 | `NEWS_SITE_PUBLISH_MODE` | Optional | `auto` or `manual` (see above). |
 | `NEWS_SITE_FORCE_REPUBLISH` | Optional | `true` to allow replacing today’s post on auto push. |
-| `TECHNEWS_SITE_ORIGIN` | Optional | e.g. `https://instakyle.tech` — absolute `imageUrl` in post JSON. |
+| `TECHNEWS_SITE_ORIGIN` | Optional | e.g. `https://instakyle.tech` — absolute `imageUrl` in post JSON when blog screenshots are on. |
+| `TECHNEWS_INSTAKYLE_SCREENSHOTS` | Optional | `1` to write `posts/images/…` on Instakyle; default **off** (email JPEGs unchanged). |
 | `TECHNEWS_VIDEO_URL` | Optional secret | That day’s video link on the post page. |
 | `YOUTUBE_API_KEY` | For optional YouTube verify/sync in **Publish Tech News to Instakyle** | Google Cloud: enable **YouTube Data API v3**, restrict key to that API. Repo **Actions secret**; used to read `videos.list` and `search.list`. |
 | `YOUTUBE_CHANNEL_ID` | Optional but recommended | Repo variable (e.g. `UC...`) to constrain auto-discovery to your channel when `youtube_url` is blank. |
@@ -90,6 +91,6 @@ Set **`TECHNEWS_WEB_DIR`** to an absolute or relative path; after a **successful
 
 ### Instakyle site (`/news`)
 
-Set **`TECHNEWS_INSTAKYLE_NEWS_DIR`** to the **Instakyle** repo path **`public/news`** (e.g. clone sibling + absolute path). After email succeeds, each run writes **`manifest.json`** (episode list), **`posts/YYYY-MM-DD.json`** (Chicago date slug), and **`posts/images/YYYY-MM-DD/*.jpg`**. The React app serves **`/news`** (index) and **`/news/:slug`** (episode). Optional **`TECHNEWS_VIDEO_URL`** = that day’s YouTube/Instagram/etc. link (shown as “Watch the video”). Optional **`TECHNEWS_SITE_ORIGIN`** (no trailing slash, e.g. `https://instakyle.tech`) fills **`imageUrl`** in post JSON as `{origin}/news/posts/images/...`. You can set **`TECHNEWS_WEB_DIR`** and **`TECHNEWS_INSTAKYLE_NEWS_DIR`** together or only one of them.
+Set **`TECHNEWS_INSTAKYLE_NEWS_DIR`** to the **Instakyle** repo path **`public/news`** (e.g. clone sibling + absolute path). After email succeeds, each run writes **`manifest.json`** (episode list) and **`posts/YYYY-MM-DD.json`** (Chicago date slug). **Instakyle posts do not include source screenshots by default** (JPEGs still attach to the email when **`SCREENSHOT_SOURCES`** is on). To write **`posts/images/YYYY-MM-DD/*.jpg`** and **`image` / `imageUrl`** on the blog again, set **`TECHNEWS_INSTAKYLE_SCREENSHOTS=1`**. The React app serves **`/news`** (index) and **`/news/:slug`** (episode). Optional **`TECHNEWS_VIDEO_URL`** = that day’s YouTube/Instagram/etc. link (shown as “Watch the video”). Optional **`TECHNEWS_SITE_ORIGIN`** (no trailing slash, e.g. `https://instakyle.tech`) fills **`imageUrl`** in post JSON when blog screenshots are enabled. You can set **`TECHNEWS_WEB_DIR`** and **`TECHNEWS_INSTAKYLE_NEWS_DIR`** together or only one of them.
 
 **Instakyle episode layout:** the Short (or watch link) and a **numbered source list** (headline + domain + favicon) share a split column on wide viewports. Optional **`videoStartSec`** per story is still written by **`WEB_VIDEO_START_SECS`** / merge for possible future use; it is not required for the current site UI.

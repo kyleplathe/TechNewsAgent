@@ -331,6 +331,15 @@ async function readManifest(path: string): Promise<NewsManifest> {
   return { schemaVersion: 1, items: [] };
 }
 
+/**
+ * Email can still attach Playwright JPEGs; Instakyle `posts/{slug}.json` omits
+ * `image` / `imageUrl` and does not write `posts/images/{slug}/*` unless enabled.
+ */
+function instakyleScreenshotsEnabled(): boolean {
+  const v = process.env.TECHNEWS_INSTAKYLE_SCREENSHOTS?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 export type WriteWebBundleOptions = {
   /**
    * Generic bundle: `latest.json`, `images/`, optional `technews.html`.
@@ -339,7 +348,7 @@ export type WriteWebBundleOptions = {
   outDir?: string;
   /**
    * Instakyle (or any static site): `manifest.json`, `posts/{slug}.json`,
-   * `posts/images/{slug}/*.jpg` under this directory (= repo `public/news`).
+   * and optionally `posts/images/{slug}/*.jpg` when `TECHNEWS_INSTAKYLE_SCREENSHOTS=1`.
    */
   instakyleNewsDir?: string;
   tickerLine: string;
@@ -541,7 +550,10 @@ export async function writeTechNewsWebBundle(
   if (instakyleRoot) {
     const postsDir = join(instakyleRoot, 'posts');
     const imgDir = join(postsDir, 'images', slug);
-    await mkdir(imgDir, { recursive: true });
+    const instakyleShots = instakyleScreenshotsEnabled();
+    if (instakyleShots) {
+      await mkdir(imgDir, { recursive: true });
+    }
 
     const postPath = join(postsDir, `${slug}.json`);
     let prevPost: Partial<TechNewsPostPayload> | null = null;
@@ -556,7 +568,11 @@ export async function writeTechNewsWebBundle(
       const b = built[i]!;
       const input = stories[i]!;
       let rel: string | null = null;
-      if (b.imageFilename && b.imageBuffer?.length) {
+      if (
+        instakyleShots &&
+        b.imageFilename &&
+        b.imageBuffer?.length
+      ) {
         rel = `posts/images/${slug}/${b.imageFilename}`;
         await writeFile(join(instakyleRoot, rel), b.imageBuffer);
       }
