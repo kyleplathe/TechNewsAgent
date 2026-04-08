@@ -12,6 +12,11 @@ export type WebPublishStoryInput = {
   /** JPEG filename (e.g. 01-slug.jpg) when a screenshot exists for this story */
   imageFilename?: string;
   imageBuffer?: Buffer;
+  /**
+   * Seconds from the start of the YouTube video for this story (slideshow sync on Instakyle).
+   * Overrides `WEB_VIDEO_START_SECS` and prior post JSON for this `storyIndex`.
+   */
+  videoStartSec?: number | null;
 };
 
 function workflowRunMeta(): {
@@ -64,6 +69,11 @@ export type TechNewsWebPayload = {
     image: string | null;
     /** Absolute URL when a public base was configured */
     imageUrl: string | null;
+    /**
+     * Seconds from the start of the embedded YouTube video for this story.
+     * When **every** story has this set, Instakyle syncs the source slideshow to playback.
+     */
+    videoStartSec?: number | null;
   }>;
 };
 
@@ -163,6 +173,59 @@ function joinUrl(base: string, rel: string): string {
   const b = base.replace(/\/+$/, '');
   const r = rel.replace(/^\/+/, '');
   return `${b}/${r}`;
+}
+
+/**
+ * `WEB_VIDEO_START_SECS` — comma-separated non-negative numbers, one per story **in order**
+ * (same order as `stories` passed to `writeTechNewsWebBundle`). Example: `0,42,88,135`.
+ */
+function parseWebVideoStartSecsEnv(storyCount: number): number[] | null {
+  const raw = process.env.WEB_VIDEO_START_SECS?.trim();
+  if (!raw || storyCount <= 0) return null;
+  const parts = raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+  if (parts.length !== storyCount) {
+    console.warn(
+      `WEB: WEB_VIDEO_START_SECS has ${parts.length} value(s) but ${storyCount} stories — ignoring env`
+    );
+    return null;
+  }
+  const out: number[] = [];
+  for (const p of parts) {
+    const v = Number(p);
+    if (!Number.isFinite(v) || v < 0) {
+      console.warn(
+        `WEB: WEB_VIDEO_START_SECS invalid segment "${p}" — ignoring entire env`
+      );
+      return null;
+    }
+    out.push(Math.floor(v));
+  }
+  return out;
+}
+
+type PrevStoryRow = { storyIndex: number; videoStartSec?: number | null };
+
+function resolveStoryVideoStartSec(
+  index: number,
+  b: { storyIndex: number },
+  input: WebPublishStoryInput,
+  envSecs: number[] | null,
+  prevStories: PrevStoryRow[] | undefined
+): number | undefined {
+  if (typeof input.videoStartSec === 'number' && input.videoStartSec >= 0) {
+    return Math.floor(input.videoStartSec);
+  }
+  if (input.videoStartSec === null) {
+    return undefined;
+  }
+  if (envSecs) {
+    return envSecs[index]!;
+  }
+  const prev = prevStories?.find((p) => p.storyIndex === b.storyIndex);
+  if (typeof prev?.videoStartSec === 'number' && prev.videoStartSec >= 0) {
+    return Math.floor(prev.videoStartSec);
+  }
+  return undefined;
 }
 
 /** A `Date` somewhere on Chicago calendar day `slug` (for formatting). */
@@ -374,6 +437,8 @@ export async function writeTechNewsWebBundle(
     });
   }
 
+  const envVideoStarts = parseWebVideoStartSecsEnv(built.length);
+
   const genericBase = publicBaseUrl?.trim().replace(/\/+$/, '') || '';
   const origin = siteOrigin?.trim().replace(/\/+$/, '') || '';
 
@@ -395,7 +460,9 @@ export async function writeTechNewsWebBundle(
 
     const payloadStories: TechNewsWebPayload['stories'] = [];
 
-    for (const b of built) {
+    for (let i = 0; i < built.length; i++) {
+      const b = built[i]!;
+      const input = stories[i]!;
       let relImage: string | null = null;
       if (b.imageFilename && b.imageBuffer?.length) {
         relImage = `images/${b.imageFilename}`;
@@ -403,7 +470,14 @@ export async function writeTechNewsWebBundle(
       }
       const imageUrl =
         relImage && genericBase ? joinUrl(genericBase, relImage) : null;
-      payloadStories.push({
+      const videoStartSec = resolveStoryVideoStartSec(
+        i,
+        b,
+        input,
+        envVideoStarts,
+        prevLatest?.stories
+      );
+      const row: TechNewsWebPayload['stories'][number] = {
         storyIndex: b.storyIndex,
         section: b.section,
         title: b.title,
@@ -412,7 +486,11 @@ export async function writeTechNewsWebBundle(
         studioNotes: b.studioNotes,
         image: relImage,
         imageUrl,
-      });
+      };
+      if (videoStartSec !== undefined) {
+        row.videoStartSec = videoStartSec;
+      }
+      payloadStories.push(row);
     }
 
     const runMeta = workflowRunMeta();
@@ -461,8 +539,18 @@ export async function writeTechNewsWebBundle(
     const imgDir = join(postsDir, 'images', slug);
     await mkdir(imgDir, { recursive: true });
 
+    const postPath = join(postsDir, `${slug}.json`);
+    let prevPost: Partial<TechNewsPostPayload> | null = null;
+    try {
+      prevPost = JSON.parse(await readFile(postPath, 'utf8')) as Partial<TechNewsPostPayload>;
+    } catch {
+      /* no prior post */
+    }
+
     const postStories: TechNewsWebPayload['stories'] = [];
-    for (const b of built) {
+    for (let i = 0; i < built.length; i++) {
+      const b = built[i]!;
+      const input = stories[i]!;
       let rel: string | null = null;
       if (b.imageFilename && b.imageBuffer?.length) {
         rel = `posts/images/${slug}/${b.imageFilename}`;
@@ -470,7 +558,14 @@ export async function writeTechNewsWebBundle(
       }
       const imageUrl =
         rel && origin ? joinUrl(origin, joinUrl('news', rel)) : null;
-      postStories.push({
+      const videoStartSec = resolveStoryVideoStartSec(
+        i,
+        b,
+        input,
+        envVideoStarts,
+        prevPost?.stories
+      );
+      const row: TechNewsWebPayload['stories'][number] = {
         storyIndex: b.storyIndex,
         section: b.section,
         title: b.title,
@@ -479,15 +574,11 @@ export async function writeTechNewsWebBundle(
         studioNotes: b.studioNotes,
         image: rel,
         imageUrl,
-      });
-    }
-
-    const postPath = join(postsDir, `${slug}.json`);
-    let prevPost: Partial<TechNewsPostPayload> | null = null;
-    try {
-      prevPost = JSON.parse(await readFile(postPath, 'utf8')) as Partial<TechNewsPostPayload>;
-    } catch {
-      /* no prior post */
+      };
+      if (videoStartSec !== undefined) {
+        row.videoStartSec = videoStartSec;
+      }
+      postStories.push(row);
     }
     const mergedPostVideo =
       (videoUrl && videoUrl.trim()) || prevPost?.videoUrl || null;
