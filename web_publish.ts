@@ -84,6 +84,10 @@ export type TechNewsPostPayload = TechNewsWebPayload & {
 
 export type NewsManifest = {
   schemaVersion: 1;
+  /** Main heading for `/news` index pages that read this manifest (e.g. Instakyle). */
+  indexTitle?: string;
+  /** Subheading under the index title; empty string means show none. */
+  indexSubtitle?: string;
   items: Array<{
     slug: string;
     displayDate: string;
@@ -408,7 +412,7 @@ export async function writeTechNewsWebBundle(
     year: 'numeric',
     timeZone: tz,
   });
-  const listTitle = `Tech News Daily — ${shortTitleDate}`;
+  const listTitle = `Tech News Daily with Kyle — ${shortTitleDate}`;
 
   type BuiltRow = {
     storyIndex: number;
@@ -613,6 +617,8 @@ export async function writeTechNewsWebBundle(
       publishedAt: postPayload.publishedAt,
       videoUrl: mergedPostVideo,
     };
+    manifest.indexTitle = 'Tech News Daily with Kyle';
+    manifest.indexSubtitle = '';
     manifest.items = [
       entry,
       ...manifest.items.filter((it) => it.slug !== slug),
