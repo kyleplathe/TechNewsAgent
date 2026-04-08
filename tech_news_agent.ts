@@ -611,7 +611,7 @@ ${localColorBlock}
 (ALL CAPS — one take, **~85–100s** (~**90s**); same story order as VIDEO_PROMPT; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
 
 <<<SOURCES>>>
-(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** at the top — e.g. \`2,5,7\` = story **2**, then **5**, then **7**. **Order = slide order** = order of JPEGs in the email: first number = first slide / first grab.)
+(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** at the top — e.g. \`2,5,7\` = story **2**, then **5**, then **7**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
 
 <<<SOCIAL>>>
 (**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; the system adds that. Max **~280 characters**, 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler. No “link in bio,” no explaining screenshots. Threads-length.)
@@ -701,12 +701,21 @@ ${localColorBlock}
     parseStudioOutput(rawOut, collected.length);
 
   const fixedOnAir = finalScript.trim();
-  const orderedIndices = reorderIndicesByScriptMention(
-    indices,
-    collected,
-    fixedOnAir,
-    videoPrompt
-  );
+  /**
+   * Email, screenshots, and blog `stories` follow this order. Default: **exact `<<<SOURCES>>>`**
+   * line order (= slide / read order the model was asked for). Optional
+   * `REORDER_SOURCES_BY_SCRIPT_MENTION=1` re-sorts by title-token hits in ON AIR + VIDEO PROMPT
+   * (fragile when VO paraphrases headlines — can scramble the list vs teleprompter).
+   */
+  const orderedIndices =
+    process.env.REORDER_SOURCES_BY_SCRIPT_MENTION?.trim() === '1'
+      ? reorderIndicesByScriptMention(
+          indices,
+          collected,
+          fixedOnAir,
+          videoPrompt
+        )
+      : indices;
 
   const used = orderedIndices
     .map((i) => collected[i - 1])
