@@ -4,7 +4,8 @@ Single Node script (`tech_news_agent.ts`) pulls RSS (+ NBA.com Timberwolves embe
 
 ## Editorial scope
 
-- **Tech:** Software, AI/ML, hardware & gadgets, gaming (news + industry), developer ecosystem, security when it’s tech news, repair/maker (e.g. Hackaday). Sources are listed in `tech_news_agent.ts` (`techFeeds` / `hardwareFeeds`).
+- **Tech:** Software, AI/ML, hardware & gadgets, gaming (news + industry), developer ecosystem, security when it’s tech news. Sources are listed in `tech_news_agent.ts` (`techFeeds` / `hardwareFeeds`).
+- **Repair:** Tech repair/right-to-repair/serviceability/teardown beats. Tagged as **Tech Repair** on the blog and prioritized first in the on-air rundown when fresh (`repairFeeds`).
 - **Sports:** Timberwolves — Canis Hoopus RSS + `nba_wolves_news.ts` (NBA.com index). Tagged **[LOCAL]**.
 - **Skate:** Thrasher, Jenkem, Quartersnacks, Village Psychic, The Berrics (best-effort). Tagged **[SKATE]**.
 - **Close:** Linden Hills neighborhood color + **required** one spoken mention of the chosen local business name (from `LOCAL_BIZ_NAME` or `local_businesses.ts` rotation), organic not a hard sell; Gemini prompt treats this as **non-negotiable** in ON AIR before the fixed sign-off.
@@ -17,6 +18,7 @@ Default max age (overridable per section):
 | Section   | Default hours | Env override                    |
 |----------|---------------|----------------------------------|
 | TECH     | 12            | `MAX_STORY_AGE_HOURS_TECH`       |
+| REPAIR   | 24            | `MAX_STORY_AGE_HOURS_REPAIR`     |
 | HARDWARE | 24            | `MAX_STORY_AGE_HOURS_HARDWARE`   |
 | SKATE    | 24            | `MAX_STORY_AGE_HOURS_SKATE`      |
 | LOCAL    | 24            | `MAX_STORY_AGE_HOURS_LOCAL`      |

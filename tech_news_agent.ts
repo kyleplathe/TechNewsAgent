@@ -80,6 +80,7 @@ const THREADS_CAP = 500;
 function buildShortTagsFromUsed(used: Collected[]): string {
   const tags = ['#TechNews'];
   if (used.some((c) => c.section === 'LOCAL')) tags.push('#Timberwolves');
+  if (used.some((c) => c.section === 'REPAIR')) tags.push('#TechRepair');
   if (used.some((c) => c.section === 'SKATE')) tags.push('#Skateboarding');
   return tags.join(' ');
 }
@@ -142,8 +143,18 @@ function stripHashtagLines(input: string): string {
   return kept.join(' ').trim();
 }
 
+function mapSectionForBlog(
+  section: Collected['section']
+): 'Software' | 'Hardware' | 'Skate' | 'Local' | 'Tech Repair' {
+  if (section === 'TECH') return 'Software';
+  if (section === 'HARDWARE') return 'Hardware';
+  if (section === 'SKATE') return 'Skate';
+  if (section === 'LOCAL') return 'Local';
+  return 'Tech Repair';
+}
+
 type Collected = {
-  section: 'TECH' | 'LOCAL' | 'HARDWARE' | 'SKATE';
+  section: 'TECH' | 'LOCAL' | 'HARDWARE' | 'SKATE' | 'REPAIR';
   feedTitle: string;
   title: string;
   link: string;
@@ -285,10 +296,11 @@ function parseDateSafe(v: string): Date | null {
 
 /**
  * Default freshness (hours). Tech is tight so you are not voicing yesterday’s cycle; override per
- * section with MAX_STORY_AGE_HOURS_TECH, _HARDWARE, _SKATE, _LOCAL in `.env`.
+ * section with MAX_STORY_AGE_HOURS_TECH, _HARDWARE, _SKATE, _LOCAL, _REPAIR in `.env`.
  */
 const DEFAULT_MAX_STORY_AGE_HOURS: Record<Collected['section'], number> = {
   LOCAL: 24,
+  REPAIR: 24,
   SKATE: 24,
   TECH: 12,
   HARDWARE: 24,
@@ -431,9 +443,14 @@ async function runNewsAgent() {
     Math.max(1, parseInt(process.env.FEED_ITEM_LIMIT ?? '4', 10) || 4)
   );
 
+  /** Repair-first pool: bench fixes, right-to-repair, teardowns, serviceability. */
+  const repairFeeds = [
+    'https://www.ifixit.com/News/rss',
+    'https://www.repairerdrivennews.com/feed/',
+  ];
   /**
-   * Tech = software, platforms, AI, security (when tech), gaming news, dev ecosystem, repair/maker
-   * culture — **not** altcoins (Bitcoin-only rule applies on headlines). Add/remove URLs here.
+   * Tech = software, platforms, AI, security (when tech), gaming news, dev ecosystem —
+   * **not** altcoins (Bitcoin-only rule applies on headlines). Add/remove URLs here.
    */
   const techFeeds = [
     'https://news.ycombinator.com/rss',
@@ -443,7 +460,6 @@ async function runNewsAgent() {
     'https://www.polygon.com/rss/index.xml/',
     'https://www.engadget.com/rss.xml',
     'https://www.gamesindustry.biz/feed',
-    'https://hackaday.com/blog/feed/',
   ];
   /** Hardware / devices / silicon — fold into the tech block on air when the story earns it. */
   const hardwareFeeds = [
@@ -474,7 +490,7 @@ async function runNewsAgent() {
 
   async function pull(
     urls: string[],
-    section: 'TECH' | 'LOCAL' | 'HARDWARE' | 'SKATE'
+    section: 'TECH' | 'LOCAL' | 'HARDWARE' | 'SKATE' | 'REPAIR'
   ): Promise<void> {
     for (const url of urls) {
       try {
@@ -504,7 +520,8 @@ async function runNewsAgent() {
     }
   }
 
-  console.log('Fetching global, hardware, and local feeds...');
+  console.log('Fetching repair, global, hardware, skate, and local feeds...');
+  await pull(repairFeeds, 'REPAIR');
   await pull(techFeeds, 'TECH');
   await pull(hardwareFeeds, 'HARDWARE');
   await pull(skateFeeds, 'SKATE');
@@ -590,8 +607,9 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const storyPickRule = `- Pick **3–5** beats from **[TECH]** + **[HARDWARE]** + **[SKATE]** combined (often **3–4** is right for a **single-take ~85–100s** read — aim **~90s**). Lead with strongest **same-day / last-few-hours** news; skate = one quick hitter only if it’s genuinely good today.
-- **Coverage mix:** software, AI/ML, hardware & gadgets, gaming (industry + games), dev tools, repair/maker — all fair game from the **[TECH]** + **[HARDWARE]** pool. **Hardware:** only when **[HARDWARE]** is clearly fresh / newsworthy; never force a device beat; don’t repeat the same product on slow news days.`;
+  const storyPickRule = `- Pick **3–5** beats from **[REPAIR]** + **[TECH]** + **[HARDWARE]** + **[SKATE]** combined (often **3–4** is right for a **single-take ~85–100s** read — aim **~90s**).
+- **Priority order:** repair first (when genuinely fresh), then software/platform news, then hardware; skate = one quick hitter only if it’s genuinely good today.
+- **Coverage mix:** repair/right-to-repair, software, AI/ML, hardware & gadgets, gaming (industry + games), dev tools — all fair game from **[REPAIR]** + **[TECH]** + **[HARDWARE]**. **Hardware:** only when clearly fresh / newsworthy; never force a device beat; don’t repeat the same product on slow days.`;
 
   const hasWolves = collected.some((c) => c.section === 'LOCAL');
 
@@ -611,14 +629,16 @@ async function runNewsAgent() {
 
   const segmentOrderBlock = hasWolves
     ? `**SEGMENT ORDER (same in both columns — do not reorder):**
-1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
-2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
-3) **THEN WOLVES** (Timberwolves — from **[LOCAL]** items: Canis Hoopus RSS plus official **NBA.com** Timberwolves news index; only if the item passes the freshness filter).
-4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`
+1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with TECH.
+2) **TECH block** — software/platform + (when worthy) device beats from **[TECH]** and **[HARDWARE]**.
+3) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
+4) **THEN WOLVES** (Timberwolves — from **[LOCAL]** items: Canis Hoopus RSS plus official **NBA.com** Timberwolves news index; only if the item passes the freshness filter).
+5) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`
     : `**SEGMENT ORDER (same in both columns — do not reorder):**
-1) **TECH block** — all tech and (when worthy) device beats; pull from **[TECH]** and **[HARDWARE]** as needed. **No** separate mandatory “hardware segment” — fold devices into the tech run when they earn it.
-2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
-3) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`;
+1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with TECH.
+2) **TECH block** — software/platform + (when worthy) device beats from **[TECH]** and **[HARDWARE]**.
+3) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
+4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`;
 
   const prompt = `
 You are a **direct, plain-spoken** tech reporter at your repair bench in Linden Hills (Minneapolis) — calm morning desk, not hype. You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
@@ -628,7 +648,7 @@ ${storyListText}
 
 QUALITY RULES:
 ${storyPickRule}
-- **Recency (critical):** The list is **pre-filtered** for freshness (tech ~**12h**, hardware/skate/local ~**24h** by default). Treat everything as **today’s desk** — not “yesterday” or “overnight” unless the item’s date is clearly **today** in US **Central**. Skip stale vibes, republished “classics,” and year-stamped reruns unless the headline proves it’s **new today**. If a headline includes “(2024)” or an old year, it is usually **not** breaking — either skip or frame as “making the rounds again,” not fresh news.
+- **Recency (critical):** The list is **pre-filtered** for freshness (tech ~**12h**; repair/hardware/skate/local ~**24h** by default). Treat everything as **today’s desk** — not “yesterday” or “overnight” unless the item’s date is clearly **today** in US **Central**. Skip stale vibes, republished “classics,” and year-stamped reruns unless the headline proves it’s **new today**. If a headline includes “(2024)” or an old year, it is usually **not** breaking — either skip or frame as “making the rounds again,” not fresh news.
 - Do not invent products, prices, or dates. Stay close to the headlines.
 - **Digital money / chains:** The show is **Bitcoin-only**. Do **not** cover altcoins, stablecoins, NFT/DeFi/Web3 industry, or generic **“crypto”** as an asset class. **Do** cover **Bitcoin** when a sourced headline is clearly about Bitcoin (ETFs, adoption, mining, Lightning, regulation aimed at Bitcoin, etc.). On air, avoid saying **“crypto”** as a bucket — say **Bitcoin** or neutral tech wording.
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
@@ -992,7 +1012,7 @@ ${localColorBlock}
       const shot = screenshotKept.find((k) => k.storyIndex === storyIndex);
       return {
         storyIndex,
-        section: c.section,
+        section: mapSectionForBlog(c.section),
         title: c.title,
         link: c.link,
         imageFilename: shot?.filename,
