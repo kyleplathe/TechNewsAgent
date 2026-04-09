@@ -78,10 +78,29 @@ function formatSocialHeadline(): string {
 const THREADS_CAP = 500;
 
 function buildShortTagsFromUsed(used: Collected[]): string {
-  const tags = ['#TechNews', '#TechTok'];
+  const tags = ['#TechNews'];
   if (used.some((c) => c.section === 'LOCAL')) tags.push('#Timberwolves');
   if (used.some((c) => c.section === 'SKATE')) tags.push('#Skateboarding');
   return tags.join(' ');
+}
+
+function topicTagsFromText(text: string): string[] {
+  const t = text.toLowerCase();
+  const out: string[] = [];
+  const add = (tag: string) => {
+    if (!out.includes(tag)) out.push(tag);
+  };
+
+  if (/\blinux\b/.test(t)) add('#Linux');
+  if (/\b(ai|artificial intelligence|openai|gemini|llm|deepfake)\b/.test(t))
+    add('#AI');
+  if (/\b(e-?bike|ebike|amflow)\b/.test(t)) add('#EBikes');
+  if (/\b(google|alphabet)\b/.test(t)) add('#Google');
+  if (/\b(thunderbird|mozilla)\b/.test(t)) add('#Mozilla');
+  if (/\b(iphone|ios|mac|macbook|apple)\b/.test(t)) add('#Apple');
+  if (/\b(nvidia|gpu)\b/.test(t)) add('#GPU');
+
+  return out.slice(0, 4);
 }
 
 function clipTitleForCaption(title: string, max: number): string {
@@ -111,6 +130,16 @@ function finalizeSocialCaption(
   b = b.slice(0, Math.max(1, maxBody - 1)) + '…';
   s = `${headline}\n\n${b}\n\n${tags}`;
   return s.length <= THREADS_CAP ? s : s.slice(0, THREADS_CAP);
+}
+
+function stripHashtagLines(input: string): string {
+  const lines = input
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const kept = lines.filter((l) => !l.startsWith('#'));
+  return kept.join(' ').trim();
 }
 
 type Collected = {
@@ -147,7 +176,7 @@ function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
 }
 
 /**
- * Studio layout: VIDEO PROMPT → ON AIR → SOURCES (indices) → SOCIAL (optional body).
+ * Studio layout: ON AIR → SOURCES (indices) → SOCIAL (optional body).
  * Backward compatible: if markers missing, whole body before SOURCES = onAir only.
  */
 function parseStudioOutput(
@@ -591,17 +620,10 @@ async function runNewsAgent() {
 2) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
 3) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`;
 
-  const beatOrderPhrase = hasWolves
-    ? 'tech → skate → Wolves → close'
-    : 'tech → skate → close';
-
-  const parityStories =
-    'Pick your covered stories once (**usually 3–4**). **Every** ON_AIR beat needs a **matching** VIDEO_PROMPT **STORY** block (same order)';
-
   const prompt = `
 You are a **direct, plain-spoken** tech reporter at your repair bench in Linden Hills (Minneapolis) — calm morning desk, not hype. You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
 
-NUMBERED STORIES FOR TODAY — **each line is numbered 1, 2, 3…** Those numbers are what you use in **<<<SOURCES>>>** and when you label **SCREENSHOT** lines in the VIDEO PROMPT (same number = same story = same email JPEG / slide):
+NUMBERED STORIES FOR TODAY — **each line is numbered 1, 2, 3…** Those numbers are what you use in **<<<SOURCES>>>** (same number = same story = same email JPEG / slide):
 ${storyListText}
 
 QUALITY RULES:
@@ -616,27 +638,15 @@ ${storyPickRule}
 - **Banned hype / podcast clichés (ON AIR and social — never say or echo):** “hold on to your hat(s),” “buckle up,” “deep dive,” “let’s dive in,” “fire hose,” “grab your popcorn,” “you won’t believe,” “crazy,” “insane” (unless the headline literally uses it), or **any** “fasten your seatbelts” style padding. Sound like a colleague at the bench, not a trailer voice.
 - **Local business (every episode):** The ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block). That line is **not** filler — **include it** even on tight ~90s reads.
 
-You are writing for a **small professional studio**: one column is the **video / post prompt** (for Final Cut), the other is **on-air copy** (teleprompter / VO only).
+You are writing for one **on-air column only** (teleprompter / VO).
 
 ${segmentOrderBlock}
 ${localColorBlock}
 
-**LOCKSTEP + COLUMN A — VIDEO PROMPT (plain text for editors — not read on camera, no Markdown):**
-- **No Markdown or markup:** Do **not** use \`#\`, \`##\`, \`**bold**\`, bullet lists with \`-\` / \`*\`, or code fences. Use **plain text** only (easy to copy into email, Notion, etc.).
-- **Visuals:** You use **only** the **source screenshots** attached to the email (one JPEG per covered story). By default they are **full mobile viewport grabs** (phone-shaped frame: site chrome + headline + fold of the article — same idea as a normal screen recording still; ~393×852 CSS px unless overridden). **Do not** call for stock footage, extra B-roll, additional stills you didn’t list, or “add clips.” Every visual is a **site grab** tied to a **story number** from the list above.
-- ${parityStories}. Same order as on air (${beatOrderPhrase}); nothing extra in either column.
-- **Structure (plain text):**
-  - **Line 1:** Short **show title** (plain, no symbols).
-  - **Each news story:** A line containing only the word **STORY** (all caps). Next line: **story headline** (one line, matches the beat). Next lines: a line starting with **SCREENSHOT:** (which story number + slide order), then optional lines starting with **NOTE:** (hold, cut, on-still text — timeline only; no extra media). Blank line between stories is OK.
-  - **After the last news story:** A line containing only **CLOSE**. Then **NOTE:** lines only for Linden Hills / **${localBizName}** on-camera reminder + stay-on-still / fade (see LINDEN HILLS block). No SCREENSHOT in CLOSE.
-- **Forbidden in this column:** **B-ROLL**, **STOCK**, **CAM** (extra camera clips), “film B-roll,” “lower third pack,” “insert clip,” or any wording that implies files beyond the **attached screenshots** (text you type in the timeline is OK).
-
----
-
 **COLUMN B — ON AIR (teleprompter / voiceover — spoken words only):**
 - **ALL CAPS.** Each story is **2–4 short lines** max: headline essence + **why it matters** + **one concrete detail** when the source headline supports it (stat, layer, product name — **skip** the detail if it forces wordiness). No long paragraphs, no recap of the whole web.
 - **Single continuous take** — write so it flows straight through after the open; no “first story / next up / finally” padding; **no** “hold on to your hats,” **no** “deep dive,” **no** “buckle up” or similar.
-- **Do not** put [B-ROLL] or shot notes here — VIDEO PROMPT only.
+- **Do not** put [B-ROLL] or shot notes in ON AIR.
 - START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
 - **Enunciation (INLINE):** phonetic in parentheses **on first mention only** next to the word — short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye). Real acronyms spelled: A I, G P U.
 - **Close:** After your last **news** beat, **before** the two fixed END lines: one or two **ALL CAPS** lines mixing **Linden Hills** color with **${localBizName}** spoken **once** by name (required — see LINDEN HILLS block). Never **shoutout**, **shout-out**, **plug**, or hard-sell.
@@ -644,19 +654,16 @@ ${localColorBlock}
 
 ---
 
-**OUTPUT FORMAT (exactly four blocks, in this order — use these marker lines literally):**
-
-<<<VIDEO_PROMPT>>>
-(Plain text: show title on line 1; then **STORY** / headline / **SCREENSHOT:** / **NOTE:** per news story; then **CLOSE** + **NOTE:** only. No Markdown. Match ON_AIR order, ${beatOrderPhrase}.)
+**OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
 
 <<<ON_AIR>>>
-(ALL CAPS — one take, **~85–100s** (~**90s**); same story order as VIDEO_PROMPT; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
+(ALL CAPS — one take, **~85–100s** (~**90s**); same order as SOURCES; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
 
 <<<SOURCES>>>
 (Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** at the top — e.g. \`2,5,7\` = story **2**, then **5**, then **7**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
 
 <<<SOCIAL>>>
-(**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; the system adds that. Max **~280 characters**, 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler. No “link in bio,” no explaining screenshots. Threads-length.)
+(**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**, 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler. No “link in bio,” no explaining screenshots. Threads-length.)
 `;
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -739,7 +746,7 @@ ${localColorBlock}
     );
   }
 
-  const { videoPrompt, onAir: finalScript, indices, social: modelSocial } =
+  const { onAir: finalScript, indices, social: modelSocial } =
     parseStudioOutput(rawOut, collected.length);
 
   const fixedOnAir = finalScript.trim();
@@ -759,20 +766,23 @@ ${localColorBlock}
     .filter((c) => c.link);
 
   const socialHeadline = formatSocialHeadline();
-  let socialBody = modelSocial.trim();
+  let socialBody = stripHashtagLines(modelSocial.trim());
   if (!socialBody) socialBody = fallbackSocialBodyFromUsed(used);
-  const shortTags = buildShortTagsFromUsed(used);
+  const topicTags = topicTagsFromText(
+    [socialBody, ...used.map((u) => u.title)].join(' ')
+  );
+  const shortTags = Array.from(
+    new Set([buildShortTagsFromUsed(used), ...topicTags].join(' ').split(/\s+/))
+  )
+    .filter(Boolean)
+    .slice(0, 5)
+    .join(' ');
   const socialCaption = finalizeSocialCaption(
     socialHeadline,
     socialBody,
     shortTags
   );
 
-  if (!videoPrompt.trim()) {
-    console.warn(
-      'No <<<VIDEO_PROMPT>>> block parsed — check model output for studio format.'
-    );
-  }
   if (!orderedIndices.length) {
     console.warn(
       'No <<<SOURCES>>> line parsed — email will omit screenshot links (check model output).'
@@ -908,7 +918,6 @@ ${localColorBlock}
       ? 'SOURCE LINKS (for this segment — screenshots / posts)'
       : 'SOURCE LINKS (none parsed — see log)';
 
-  const videoHeader = 'VIDEO PROMPT — plain text (edit / Final Cut / post)';
   const onAirHeader = 'ON AIR (teleprompter / VO)';
   const socialHeader =
     'SOCIAL — Tech News Daily with Kyle (video caption / description)';
@@ -928,9 +937,6 @@ ${localColorBlock}
 
   const emailText = [
     tickerLine,
-    '',
-    videoHeader,
-    videoPrompt.trim() || '(none — check model output)',
     '',
     onAirHeader,
     fixedOnAir.trim(),
@@ -952,8 +958,6 @@ ${localColorBlock}
   const emailHtml =
     `<div style="font-family:system-ui,sans-serif;max-width:760px;color:#111">` +
     tickerHtml +
-    `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(videoHeader)}</p>` +
-    `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.45;margin:0 0 1.5em;padding:12px;background:#f6f7f8;border-radius:8px;border:1px solid #e8e8e8">${escapeHtml(videoPrompt.trim() || '(none)')}</pre>` +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(onAirHeader)}</p>` +
     `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd">${escapeHtml(fixedOnAir.trim())}</pre>` +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(socialHeader)}</p>` +
@@ -1000,9 +1004,15 @@ ${localColorBlock}
       ...(instakyleNewsDir ? { instakyleNewsDir } : {}),
       tickerLine,
       socialCaption,
-      videoPrompt: videoPrompt.trim(),
+      videoPrompt: '',
       onAirPlain: fixedOnAir.trim(),
       stories: webStories,
+      localBusiness: {
+        name: pickedBiz.name,
+        category: pickedBiz.category,
+        description: pickedBiz.description,
+        website: pickedBiz.website ?? null,
+      },
       videoUrl: techNewsVideoUrl,
       publicBaseUrl: process.env.TECHNEWS_PUBLIC_BASE_URL?.trim() || undefined,
       siteOrigin: process.env.TECHNEWS_SITE_ORIGIN?.trim() || undefined,
@@ -1029,9 +1039,6 @@ ${localColorBlock}
   console.log('Mission accomplished. Resend id:', sendData?.id);
   if (attachments?.length) {
     console.log(`Attached ${attachments.length} source screenshot(s).`);
-  }
-  if (videoPrompt.trim()) {
-    console.log('\n--- VIDEO PROMPT ---\n' + videoPrompt.trim());
   }
   if (linksText) {
     console.log('\n--- Segment links ---\n' + linksText);

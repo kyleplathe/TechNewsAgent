@@ -1,21 +1,12 @@
-# One-button publish flow for the latest episode bundle.
-# Use when NEWS_SITE_PUBLISH_MODE=manual: run this after filming.
-# Optional YouTube URL or token auto-discovery verifies + syncs in the same run.
+# YouTube sync helper for an already-published `/news` episode.
+# Daily workflow now handles the post JSON update automatically on email send.
+# This workflow only verifies/syncs the YouTube Short into existing `public/news`.
 
 name: Publish Tech News to Instakyle
 
 'on':
   workflow_dispatch:
     inputs:
-      source_run_id:
-        description: 'Run ID of a successful Daily Tech News Agent workflow (leave empty = latest success)'
-        required: false
-        type: string
-      force_replace_today:
-        description: 'Overwrite if today’s episode is already on the site'
-        required: false
-        type: boolean
-        default: false
       youtube_url:
         description: 'Optional YouTube URL (watch/shorts/youtu.be) to verify + sync while publishing'
         required: false
@@ -26,89 +17,20 @@ name: Publish Tech News to Instakyle
         type: boolean
         default: true
       slug:
-        description: 'Optional episode slug YYYY-MM-DD for YouTube sync/search (defaults to bundle slug)'
+        description: 'Optional episode slug YYYY-MM-DD (defaults to newest manifest item slug)'
         required: false
         type: string
 
 permissions:
-  contents: read
-  actions: read
+  contents: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout (for gh + context)
+      - name: Checkout agent repo (for scripts)
         uses: actions/checkout@v6
-
-      # Daily only uploads `news-site-bundle` when INSTAKYLE_PUSH_TOKEN was set (non-empty news dir).
-      # Picks the newest successful Daily run that actually has this artifact (avoids "artifact not found").
-      - name: Resolve source workflow run
-        id: src
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          REPO="${{ github.repository }}"
-          ART_NAME="news-site-bundle"
-
-          has_bundle_artifact() {
-            local rid="$1"
-            gh api "repos/${REPO}/actions/runs/${rid}/artifacts" --paginate \
-              --jq '.artifacts[].name' 2>/dev/null | grep -qx "$ART_NAME"
-          }
-
-          if [ -n "${{ inputs.source_run_id }}" ]; then
-            RID="${{ inputs.source_run_id }}"
-            if ! has_bundle_artifact "$RID"; then
-              echo "::error::Run ${RID} has no artifact \"${ART_NAME}\"."
-              echo "That usually means Daily ran without INSTAKYLE_PUSH_TOKEN (bundle never uploaded), the artifact expired (5-day retention), or the run ID is wrong."
-              echo "Fix: run Daily Tech News Agent successfully with PAT set, open that run → Artifacts → confirm ${ART_NAME}, then publish again (or pass that run's ID as source_run_id)."
-              exit 1
-            fi
-            echo "run_id=${RID}" >> "$GITHUB_OUTPUT"
-            echo "Using workflow run (manual): ${RID}"
-            exit 0
-          fi
-
-          RUN_IDS=$(gh run list \
-            --repo "${REPO}" \
-            --workflow=daily_news.yml \
-            --status=success \
-            --limit=30 \
-            --json databaseId \
-            -q '.[].databaseId' | tr '\n' ' ')
-          if [ -z "${RUN_IDS}" ]; then
-            echo "::error::No successful Daily Tech News Agent runs found."
-            exit 1
-          fi
-
-          RID=""
-          for cand in ${RUN_IDS}; do
-            if has_bundle_artifact "${cand}"; then
-              RID="${cand}"
-              break
-            fi
-          done
-
-          if [ -z "${RID}" ]; then
-            echo "::error::No recent successful Daily run has artifact \"${ART_NAME}\" (checked last 30)."
-            echo "Daily only uploads this artifact when INSTAKYLE_PUSH_TOKEN is configured (see workflow \"Resolve news output directory\")."
-            echo "Fix: run Daily Tech News Agent again with the secret set, wait for success, then run this workflow."
-            exit 1
-          fi
-
-          echo "run_id=${RID}" >> "$GITHUB_OUTPUT"
-          echo "Using workflow run (newest Daily with ${ART_NAME}): ${RID}"
-
-      - name: Download news-site-bundle artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: news-site-bundle
-          path: bundle
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ steps.src.outputs.run_id }}
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -126,31 +48,27 @@ jobs:
           path: instakyle-site
           token: ${{ secrets.INSTAKYLE_PUSH_TOKEN }}
 
-      - name: Merge bundle into public/news
-        id: merge
-        working-directory: instakyle-site
+      - name: Resolve episode slug
+        id: slug
         run: |
-          set -e
-          shopt -s nullglob
-          posts=(../bundle/posts/*.json)
-          if [ ${#posts[@]} -eq 0 ]; then
-            echo "No posts/*.json in artifact bundle."
+          set -euo pipefail
+          if [ -n "${{ inputs.slug }}" ]; then
+            echo "slug=${{ inputs.slug }}" >> "$GITHUB_OUTPUT"
+            echo "Using slug from input: ${{ inputs.slug }}"
+            exit 0
+          fi
+          MANIFEST="${GITHUB_WORKSPACE}/instakyle-site/public/news/manifest.json"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::manifest.json not found at $MANIFEST"
             exit 1
           fi
-          SLUG=$(basename "${posts[0]}" .json)
-          echo "bundle_slug=${SLUG}" >> "$GITHUB_OUTPUT"
-          if [ ${#posts[@]} -gt 1 ]; then
-            echo "Warning: multiple post JSON files in bundle; using first slug ${SLUG}"
+          SLUG=$(node -e 'const fs=require("node:fs");const m=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const s=m?.items?.[0]?.slug||"";if(!s)process.exit(1);process.stdout.write(String(s));' "$MANIFEST") || true
+          if [ -z "$SLUG" ]; then
+            echo "::error::Could not resolve slug from manifest first item."
+            exit 1
           fi
-          BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          git fetch origin "$BRANCH"
-          if [ "${{ inputs.force_replace_today }}" != "true" ]; then
-            if git cat-file -e "origin/${BRANCH}:public/news/posts/${SLUG}.json" 2>/dev/null; then
-              echo "Episode ${SLUG} is already live on the default branch. Re-run with force_replace_today to overwrite."
-              exit 0
-            fi
-          fi
-          rsync -a "${GITHUB_WORKSPACE}/bundle/" "public/news/"
+          echo "slug=${SLUG}" >> "$GITHUB_OUTPUT"
+          echo "Using newest manifest slug: ${SLUG}"
 
       - name: Verify YouTube and sync episode
         if: ${{ inputs.youtube_url != '' || inputs.auto_find_youtube == true }}
@@ -159,15 +77,11 @@ jobs:
           YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
         run: |
           set -e
-          SYNC_SLUG="${{ inputs.slug }}"
-          if [ -z "$SYNC_SLUG" ]; then
-            SYNC_SLUG="${{ steps.merge.outputs.bundle_slug }}"
-          fi
+          SYNC_SLUG="${{ steps.slug.outputs.slug }}"
           ARGS=( --news-dir "${GITHUB_WORKSPACE}/instakyle-site/public/news" )
           if [ -n "${{ inputs.youtube_url }}" ]; then
             ARGS+=( --youtube-url "${{ inputs.youtube_url }}" )
           else
-            ARGS+=( --allow-missing )
             if [ -n "${YOUTUBE_CHANNEL_ID}" ]; then
               ARGS+=( --channel-id "${YOUTUBE_CHANNEL_ID}" )
             fi
@@ -181,17 +95,14 @@ jobs:
         working-directory: instakyle-site
         run: |
           set -e
-          SLUG="${{ steps.merge.outputs.bundle_slug }}"
+          SLUG="${{ steps.slug.outputs.slug }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/news
+          git add "public/news/posts/${SLUG}.json" "public/news/manifest.json"
           if git diff --staged --quiet; then
-            echo "No git changes (bundle matched tree)."
+            echo "No YouTube sync changes to commit."
             exit 0
           fi
-          MSG="chore(news): publish Tech News episode (${SLUG})"
-          if [ -n "${{ inputs.youtube_url }}" ] || [ "${{ inputs.auto_find_youtube }}" = "true" ]; then
-            MSG="chore(news): publish + sync YouTube (${SLUG})"
-          fi
+          MSG="chore(news): sync YouTube short (${SLUG})"
           git commit -m "$MSG"
           git push origin HEAD

@@ -2,6 +2,7 @@ export type LocalBusiness = {
   name: string;
   category: string;
   description: string;
+  website?: string;
   tags: string[];
 };
 

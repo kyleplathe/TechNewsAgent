@@ -51,6 +51,12 @@ export type TechNewsWebPayload = {
   /** Set in GitHub Actions — ties the episode JSON to the workflow run that built it */
   sourceWorkflowRunId?: string | null;
   sourceWorkflowRunUrl?: string | null;
+  localBusiness?: {
+    name: string;
+    category: string;
+    description: string;
+    website?: string | null;
+  } | null;
   tickerLine: string;
   socialCaption: string;
   /** Plain-text editor column (no Markdown). */
@@ -356,6 +362,12 @@ export type WriteWebBundleOptions = {
   videoPrompt: string;
   onAirPlain: string;
   stories: WebPublishStoryInput[];
+  localBusiness?: {
+    name: string;
+    category: string;
+    description: string;
+    website?: string | null;
+  } | null;
   /** Optional link embedded in JSON + manifest (e.g. YouTube). */
   videoUrl?: string | null;
   /**
@@ -383,6 +395,7 @@ export async function writeTechNewsWebBundle(
     videoPrompt,
     onAirPlain,
     stories,
+    localBusiness = null,
     videoUrl = null,
     publicBaseUrl,
     siteOrigin,
@@ -515,6 +528,7 @@ export async function writeTechNewsWebBundle(
       youtubeVideoId: mergedGenYoutubeId,
       episodeVerificationToken,
       ...runMeta,
+      localBusiness,
       tickerLine,
       socialCaption,
       videoPrompt,
@@ -615,6 +629,7 @@ export async function writeTechNewsWebBundle(
       youtubeVideoId: mergedPostYoutubeId,
       episodeVerificationToken,
       ...runMeta,
+      localBusiness,
       tickerLine,
       socialCaption,
       videoPrompt,

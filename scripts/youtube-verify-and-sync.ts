@@ -105,6 +105,40 @@ async function discoverVideoIdByToken(
   return null;
 }
 
+async function discoverVideoIdByTokenWithRetry(
+  token: string,
+  apiKey: string,
+  channelId: string | null
+): Promise<string | null> {
+  const attempts = Math.min(
+    20,
+    Math.max(
+      1,
+      parseInt(process.env.YOUTUBE_DISCOVERY_ATTEMPTS ?? '8', 10) || 8
+    )
+  );
+  const sleepMs = Math.min(
+    120_000,
+    Math.max(
+      5_000,
+      parseInt(process.env.YOUTUBE_DISCOVERY_SLEEP_MS ?? '30000', 10) || 30_000
+    )
+  );
+  for (let i = 1; i <= attempts; i++) {
+    const id = await discoverVideoIdByToken(token, apiKey, channelId);
+    if (id) return id;
+    if (i < attempts) {
+      console.log(
+        `YouTube token search miss (${i}/${attempts}) for "${token}" — waiting ${Math.round(
+          sleepMs / 1000
+        )}s before retry...`
+      );
+      await new Promise((r) => setTimeout(r, sleepMs));
+    }
+  }
+  return null;
+}
+
 async function main() {
   const { youtubeUrl, newsDir, slug: slugArg, channelId, allowMissing } =
     parseArgs(process.argv);
@@ -144,7 +178,7 @@ async function main() {
       throw new Error(`Could not parse YouTube video id from: ${youtubeUrl}`);
     }
   } else {
-    videoId = await discoverVideoIdByToken(token, apiKey, channelId);
+    videoId = await discoverVideoIdByTokenWithRetry(token, apiKey, channelId);
     if (!videoId) {
       if (allowMissing) {
         console.log(
