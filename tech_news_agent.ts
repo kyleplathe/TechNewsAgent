@@ -266,6 +266,15 @@ function isRetryableResendError(err: { name?: string; message?: string }): boole
   return false;
 }
 
+function isResendApplicationNotFound(err: {
+  name?: string;
+  message?: string;
+}): boolean {
+  const name = (err.name ?? '').toLowerCase();
+  const msg = (err.message ?? '').toLowerCase();
+  return name.includes('application_not_found') || msg.includes('application not found');
+}
+
 function normalizeText(s: string): string {
   return s
     .toLowerCase()
@@ -952,8 +961,16 @@ ${localColorBlock}
 
   const resendKey = process.env.RESEND_API_KEY;
   const toRaw = process.env.RESEND_TO?.trim();
-  const from =
-    process.env.RESEND_FROM?.trim() || 'Daily Script <agent@instakyle.tech>';
+  const configuredFrom = process.env.RESEND_FROM?.trim() || '';
+  const defaultPrimaryFrom = 'Daily Script <agent@instakyle.tech>';
+  const defaultFallbackFrom = 'Daily Script <onboarding@resend.dev>';
+  const fromCandidates = Array.from(
+    new Set(
+      [configuredFrom, defaultPrimaryFrom, defaultFallbackFrom].filter(
+        (v) => v.length > 0
+      )
+    )
+  );
 
   if (!resendKey) {
     throw new Error('Set RESEND_API_KEY');
@@ -1034,37 +1051,52 @@ ${localColorBlock}
     | undefined;
   let lastSendErr: { name?: string; message?: string } | undefined;
 
-  for (let attempt = 1; attempt <= resendMaxAttempts; attempt++) {
-    const res = await resend.emails.send({
-      from,
-      to,
-      subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}${attachments?.length ? ' 📎' : ''}`,
-      text: emailText,
-      html: emailHtml,
-      ...(attachments?.length ? { attachments } : {}),
-    });
+  for (const from of fromCandidates) {
+    for (let attempt = 1; attempt <= resendMaxAttempts; attempt++) {
+      const res = await resend.emails.send({
+        from,
+        to,
+        subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}${attachments?.length ? ' 📎' : ''}`,
+        text: emailText,
+        html: emailHtml,
+        ...(attachments?.length ? { attachments } : {}),
+      });
 
-    if (!res.error) {
-      sendData = res.data;
-      lastSendErr = undefined;
-      break;
+      if (!res.error) {
+        sendData = res.data;
+        lastSendErr = undefined;
+        break;
+      }
+
+      lastSendErr = {
+        name: res.error.name,
+        message: res.error.message,
+      };
+      const retryable = isRetryableResendError(lastSendErr);
+      const appMissing = isResendApplicationNotFound(lastSendErr);
+
+      if (appMissing) {
+        if (from !== fromCandidates[fromCandidates.length - 1]) {
+          console.warn(
+            `Resend sender "${from}" unavailable (${lastSendErr.message}). Trying fallback sender…`
+          );
+        }
+        break;
+      }
+      if (!retryable || attempt >= resendMaxAttempts) {
+        break;
+      }
+
+      const parsedRetryAfter = parseRetryAfterSeconds(lastSendErr.message ?? '');
+      const waitSec = parsedRetryAfter ?? Math.min(12 * attempt, 60);
+      console.warn(
+        `Resend send failed (${lastSendErr.name ?? 'error'}). Waiting ${waitSec}s — retry ${attempt + 1}/${resendMaxAttempts}…`
+      );
+      await new Promise((r) => setTimeout(r, waitSec * 1000));
     }
 
-    lastSendErr = {
-      name: res.error.name,
-      message: res.error.message,
-    };
-    const retryable = isRetryableResendError(lastSendErr);
-    if (!retryable || attempt >= resendMaxAttempts) {
-      break;
-    }
-
-    const parsedRetryAfter = parseRetryAfterSeconds(lastSendErr.message ?? '');
-    const waitSec = parsedRetryAfter ?? Math.min(12 * attempt, 60);
-    console.warn(
-      `Resend send failed (${lastSendErr.name ?? 'error'}). Waiting ${waitSec}s — retry ${attempt + 1}/${resendMaxAttempts}…`
-    );
-    await new Promise((r) => setTimeout(r, waitSec * 1000));
+    if (!lastSendErr) break;
+    if (!isResendApplicationNotFound(lastSendErr)) break;
   }
 
   if (lastSendErr) {
