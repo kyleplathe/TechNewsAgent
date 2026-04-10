@@ -241,6 +241,31 @@ function parseGeminiRetrySeconds(message: string): number | null {
   return Math.min(120, Math.max(1, parseFloat(m[1])));
 }
 
+function parseRetryAfterSeconds(message: string): number | null {
+  const m =
+    message.match(/retry[- ]after[:\s]+(\d+)\s*s?/i) ??
+    message.match(/retry in[:\s]+(\d+)\s*s?/i);
+  if (!m) return null;
+  const secs = parseInt(m[1] ?? '', 10);
+  if (!Number.isFinite(secs) || secs <= 0) return null;
+  return Math.min(120, secs);
+}
+
+function isRetryableResendError(err: { name?: string; message?: string }): boolean {
+  const name = (err.name ?? '').toLowerCase();
+  const msg = (err.message ?? '').toLowerCase();
+  if (name.includes('application_error') || name.includes('timeout')) return true;
+  if (/\b(429|500|502|503|504)\b/.test(msg)) return true;
+  if (
+    msg.includes('internal server error') ||
+    msg.includes('try again later') ||
+    msg.includes('temporar')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function normalizeText(s: string): string {
   return s
     .toLowerCase()
@@ -599,6 +624,13 @@ async function runNewsAgent() {
     return hasReturnTrigger(c.title);
   });
 
+  // Newest-first in the numbered list so the model reaches for fresh headlines first.
+  collected.sort((a, b) => {
+    const ta = parseDateSafe(a.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
+    const tb = parseDateSafe(b.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
+    return tb - ta;
+  });
+
   const storyListText = collected
     .map((c, i) => {
       const n = i + 1;
@@ -607,9 +639,11 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const storyPickRule = `- Pick **3–5** beats from **[REPAIR]** + **[TECH]** + **[HARDWARE]** + **[SKATE]** combined (often **3–4** is right for a **single-take ~85–100s** read — aim **~90s**).
-- **Priority order:** repair first (when genuinely fresh), then software/platform news, then hardware; skate = one quick hitter only if it’s genuinely good today.
-- **Coverage mix:** repair/right-to-repair, software, AI/ML, hardware & gadgets, gaming (industry + games), dev tools — all fair game from **[REPAIR]** + **[TECH]** + **[HARDWARE]**. **Hardware:** only when clearly fresh / newsworthy; never force a device beat; don’t repeat the same product on slow days.`;
+  const storyPickRule = `- **<<<SOURCES>>> length = slide count:** Pick **3–4 story numbers** total, **hard cap 4** (**never 5+**). Aim **3** for a clean desk. A tight show beats a laundry list.
+- **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first** (publish time). When several headlines are similarly strong, prefer the **newer** item.
+- **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~90s**.
+- **Culture / sports slot:** **Prefer at most one** of **[SKATE]** or **Wolves** (**[LOCAL]**). If you use **both**, each must be **one sentence** and you must still hit the **~90s** / **word budget** (almost always pick **one**).
+- **Hardware** only when it clearly earns it; never force a gadget beat.`;
 
   const hasWolves = collected.some((c) => c.section === 'LOCAL');
 
@@ -629,21 +663,20 @@ async function runNewsAgent() {
 
   const segmentOrderBlock = hasWolves
     ? `**SEGMENT ORDER (same in both columns — do not reorder):**
-1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with TECH.
-2) **TECH block** — software/platform + (when worthy) device beats from **[TECH]** and **[HARDWARE]**.
-3) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
-4) **THEN WOLVES** (Timberwolves — from **[LOCAL]** items: Canis Hoopus RSS plus official **NBA.com** Timberwolves news index; only if the item passes the freshness filter).
-5) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`
+1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with the strongest **TECH**/**HARDWARE** headline.
+2) **TECH block** — **1–2** beats from **[TECH]** + **[HARDWARE]** (software, AI, hardware, gaming industry, **Bitcoin** when the headline is Bitcoin-specific) — **freshest and most newsworthy**, not “cover everything.”
+3) **OPTIONAL: SKATE and/or WOLVES** — **prefer one** quick hit: **[SKATE]** or a fresh **Wolves** beat from **[LOCAL]** (Canis Hoopus + **NBA.com** index). Only use **both** if each is **one short sentence** and you stay under the ON AIR word budget; otherwise skip to close.
+4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`
     : `**SEGMENT ORDER (same in both columns — do not reorder):**
-1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with TECH.
-2) **TECH block** — software/platform + (when worthy) device beats from **[TECH]** and **[HARDWARE]**.
-3) **THEN SKATE** — one quick skateboarding beat (from **[SKATE]** only) if there’s a legit premiere / real news; otherwise skip skate and keep it tight.
+1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with the strongest **TECH**/**HARDWARE** headline.
+2) **TECH block** — **1–2** beats from **[TECH]** + **[HARDWARE]** (software, AI, hardware, gaming industry, **Bitcoin** when the headline is Bitcoin-specific) — **freshest and most newsworthy**, not “cover everything.”
+3) **OPTIONAL: SKATE** — one quick **[SKATE]** beat only if it’s legit; otherwise skip to close.
 4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`;
 
   const prompt = `
 You are a **direct, plain-spoken** tech reporter at your repair bench in Linden Hills (Minneapolis) — calm morning desk, not hype. You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
 
-NUMBERED STORIES FOR TODAY — **each line is numbered 1, 2, 3…** Those numbers are what you use in **<<<SOURCES>>>** (same number = same story = same email JPEG / slide):
+NUMBERED STORIES FOR TODAY — **sorted newest-first**, **each line is numbered 1, 2, 3…** Use those numbers in **<<<SOURCES>>>** (same number = same story = same email JPEG / slide):
 ${storyListText}
 
 QUALITY RULES:
@@ -654,7 +687,8 @@ ${storyPickRule}
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
 - **Wolves / LOCAL** — **Canis Hoopus (RSS)** plus **NBA.com Timberwolves** index (same **[LOCAL]** list). Use the basketball beat **only** when the item is **fresh**; if nothing qualifies, **skip Wolves** entirely.
 - Skateboarding: use **[SKATE]** for one quick, legit beat (premiere, contest, real news). Skip if nothing’s good.
-- **One vertical take, ~85–100 seconds** read aloud (target **~90s**) — **tight but not thin**: add **one concrete detail** on main beats when the headline gives you something real (a number, vendor, mechanism, “what they found”) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
+- **Length (non-negotiable):** One vertical take **~90 seconds** — treat **~85s as a soft floor** and **~95s as a hard ceiling** at a calm read. **Budget ~175–215 spoken words** between the fixed START line and the fixed END lines (ALL CAPS reads a little slow — stay lean). **If you are over budget, cut beats** before you cut the **${localBizName}** close.
+- **Tight but not thin:** On **main** beats only, add **one concrete detail** when the headline gives you something real (a number, vendor, mechanism) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
 - **Banned hype / podcast clichés (ON AIR and social — never say or echo):** “hold on to your hat(s),” “buckle up,” “deep dive,” “let’s dive in,” “fire hose,” “grab your popcorn,” “you won’t believe,” “crazy,” “insane” (unless the headline literally uses it), or **any** “fasten your seatbelts” style padding. Sound like a colleague at the bench, not a trailer voice.
 - **Local business (every episode):** The ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block). That line is **not** filler — **include it** even on tight ~90s reads.
 
@@ -664,12 +698,12 @@ ${segmentOrderBlock}
 ${localColorBlock}
 
 **COLUMN B — ON AIR (teleprompter / voiceover — spoken words only):**
-- **ALL CAPS.** Each story is **2–4 short lines** max: headline essence + **why it matters** + **one concrete detail** when the source headline supports it (stat, layer, product name — **skip** the detail if it forces wordiness). No long paragraphs, no recap of the whole web.
-- **Single continuous take** — write so it flows straight through after the open; no “first story / next up / finally” padding; **no** “hold on to your hats,” **no** “deep dive,” **no** “buckle up” or similar.
+- **ALL CAPS.** Each **main** story (**REPAIR** + **TECH**/**HARDWARE**) is **1–3 short lines** max: headline essence + **why it matters** + **one concrete detail** only when it fits without bloat (**skip** the detail if it forces wordiness). **SKATE** / **Wolves**: **≤2 short lines** each; often **one sentence** is enough. No long paragraphs, no recap of the whole web.
+- **Single continuous take** — write so it flows straight through after the open; **no** “coming up / we’ve also got” runway; no “first story / next up / finally” padding; **no** “hold on to your hats,” **no** “deep dive,” **no** “buckle up” or similar.
 - **Do not** put [B-ROLL] or shot notes in ON AIR.
-- START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. WE'VE GOT A LOT HITTING THE SHOP TODAY.
+- START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. AND WE'VE GOT A LOT HITTING THE SHOP TODAY.
 - **Enunciation (INLINE):** phonetic in parentheses **on first mention only** next to the word — short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye). Real acronyms spelled: A I, G P U.
-- **Close:** After your last **news** beat, **before** the two fixed END lines: one or two **ALL CAPS** lines mixing **Linden Hills** color with **${localBizName}** spoken **once** by name (required — see LINDEN HILLS block). Never **shoutout**, **shout-out**, **plug**, or hard-sell.
+- **Close:** After your last **news** beat, **before** the two fixed END lines: **one** tight **ALL CAPS** line (two only if still under word budget) mixing **Linden Hills** color with **${localBizName}** spoken **once** by name (required — see LINDEN HILLS block). Never **shoutout**, **shout-out**, **plug**, or hard-sell.
 - END exactly (literal, final two sentences of ON AIR): BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
 
 ---
@@ -677,10 +711,10 @@ ${localColorBlock}
 **OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
 
 <<<ON_AIR>>>
-(ALL CAPS — one take, **~85–100s** (~**90s**); same order as SOURCES; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
+(ALL CAPS — one take, **~90s** with **~175–215 words** between START and END; same order as SOURCES; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
 
 <<<SOURCES>>>
-(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** at the top — e.g. \`2,5,7\` = story **2**, then **5**, then **7**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
+(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **3 typical, 4 maximum**, never more. E.g. \`2,5,7\` = story **2**, then **5**, then **7**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
 
 <<<SOCIAL>>>
 (**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**, 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler. No “link in bio,” no explaining screenshots. Threads-length.)
@@ -989,17 +1023,52 @@ ${localColorBlock}
     screenshotBannerHtml +
     `</div>`;
 
-  const { data: sendData, error: sendErr } = await resend.emails.send({
-    from,
-    to,
-    subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}${attachments?.length ? ' 📎' : ''}`,
-    text: emailText,
-    html: emailHtml,
-    ...(attachments?.length ? { attachments } : {}),
-  });
+  const resendMaxAttempts = Math.min(
+    8,
+    Math.max(1, parseInt(process.env.RESEND_MAX_RETRIES ?? '4', 10) || 4)
+  );
+  let sendData:
+    | {
+        id?: string | null;
+      }
+    | undefined;
+  let lastSendErr: { name?: string; message?: string } | undefined;
 
-  if (sendErr) {
-    throw new Error(`Resend: ${sendErr.message} (${sendErr.name})`);
+  for (let attempt = 1; attempt <= resendMaxAttempts; attempt++) {
+    const res = await resend.emails.send({
+      from,
+      to,
+      subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}${attachments?.length ? ' 📎' : ''}`,
+      text: emailText,
+      html: emailHtml,
+      ...(attachments?.length ? { attachments } : {}),
+    });
+
+    if (!res.error) {
+      sendData = res.data;
+      lastSendErr = undefined;
+      break;
+    }
+
+    lastSendErr = {
+      name: res.error.name,
+      message: res.error.message,
+    };
+    const retryable = isRetryableResendError(lastSendErr);
+    if (!retryable || attempt >= resendMaxAttempts) {
+      break;
+    }
+
+    const parsedRetryAfter = parseRetryAfterSeconds(lastSendErr.message ?? '');
+    const waitSec = parsedRetryAfter ?? Math.min(12 * attempt, 60);
+    console.warn(
+      `Resend send failed (${lastSendErr.name ?? 'error'}). Waiting ${waitSec}s — retry ${attempt + 1}/${resendMaxAttempts}…`
+    );
+    await new Promise((r) => setTimeout(r, waitSec * 1000));
+  }
+
+  if (lastSendErr) {
+    throw new Error(`Resend: ${lastSendErr.message} (${lastSendErr.name})`);
   }
 
   const webDir = process.env.TECHNEWS_WEB_DIR?.trim();
