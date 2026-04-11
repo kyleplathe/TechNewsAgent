@@ -6,7 +6,11 @@ import {
   getChicagoEpisodeNow,
 } from './web_publish';
 import { Resend } from 'resend';
-import { LOCAL_INTERSECTION_CENTER, pickLocalBusiness } from './local_businesses';
+import {
+  LOCAL_EARLY_MORNING_SHOPS,
+  LOCAL_INTERSECTION_CENTER,
+  pickLocalBusiness,
+} from './local_businesses';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 function escapeHtml(s: string): string {
@@ -143,6 +147,57 @@ function stripHashtagLines(input: string): string {
   return kept.join(' ').trim();
 }
 
+/** Letters-only ratio of A–Z — models sometimes echo ON AIR and paste ALL CAPS into <<<SOCIAL>>>. */
+function isMostlyUppercaseLatin(text: string): boolean {
+  const letters = text.replace(/[^A-Za-z]/g, '');
+  if (letters.length < 8) return false;
+  const up = [...letters].filter((c) => c >= 'A' && c <= 'Z').length;
+  return up / letters.length >= 0.72;
+}
+
+/**
+ * Facebook / Meta often downranks ALL CAPS as distracting. Convert shouty model output to
+ * sentence case and restore common tech brand spellings.
+ */
+function normalizeSocialBodySentenceCase(body: string): string {
+  const t = body.trim();
+  if (!t || !isMostlyUppercaseLatin(t)) return t;
+
+  let s = t.toLowerCase();
+  s = s.replace(/^\s*([a-z])/, (m) => m.toUpperCase());
+  s = s.replace(/([.!?])\s+([a-z])/g, (_, end: string, c: string) => `${end} ${c.toUpperCase()}`);
+
+  const fixes: Array<[RegExp, string]> = [
+    [/\bai\b/g, 'AI'],
+    [/\bapi\b/g, 'API'],
+    [/\bgpu\b/g, 'GPU'],
+    [/\bcpu\b/gi, 'CPU'],
+    [/\bcpus\b/gi, 'CPUs'],
+    [/\bios\b/gi, 'iOS'],
+    [/\bipados\b/gi, 'iPadOS'],
+    [/\biphone\b/gi, 'iPhone'],
+    [/\bipad\b/gi, 'iPad'],
+    [/\bmacos\b/gi, 'macOS'],
+    [/\bwatchos\b/gi, 'watchOS'],
+    [/\btvos\b/gi, 'tvOS'],
+    [/\bvisionos\b/gi, 'visionOS'],
+    [/\busb\b/gi, 'USB'],
+    [/\bssd\b/gi, 'SSD'],
+    [/\bram\b/gi, 'RAM'],
+    [/\bnba\b/gi, 'NBA'],
+    [/\bopenai\b/gi, 'OpenAI'],
+    [/\bgithub\b/gi, 'GitHub'],
+    [/\byoutube\b/gi, 'YouTube'],
+    [/\blinden hills\b/gi, 'Linden Hills'],
+    [/\btimberwolves\b/gi, 'Timberwolves'],
+    [/\bminneapolis\b/gi, 'Minneapolis'],
+  ];
+  for (const [re, rep] of fixes) {
+    s = s.replace(re, rep);
+  }
+  return s;
+}
+
 function mapSectionForBlog(
   section: Collected['section']
 ): 'Software' | 'Hardware' | 'Skate' | 'Local' | 'Tech Repair' {
@@ -151,6 +206,54 @@ function mapSectionForBlog(
   if (section === 'SKATE') return 'Skate';
   if (section === 'LOCAL') return 'Local';
   return 'Tech Repair';
+}
+
+/**
+ * Hardware feeds (Apple Newsroom, 9to5Mac, Tom's Hardware) mix device news with OS/app/platform
+ * stories. Re-tag obvious software beats as TECH so prompts, email tags, and blog categories stay
+ * [TECH] / Software instead of mislabeled Hardware.
+ */
+function looksLikeSoftwareStoryFromHardwareFeed(text: string): boolean {
+  const t = text.toLowerCase();
+
+  if (/\bapp store\b/.test(t)) return true;
+  if (/\b(google play|play store)\b/.test(t)) return true;
+
+  // Windows / Microsoft OS servicing (require Windows or Microsoft — avoids "insider" GPU rumor posts)
+  if (/\bwindows\s+insider\b/.test(t)) return true;
+  if (
+    /\binsider\s+(?:preview|program|build|channel)\b/.test(t) &&
+    /\bwindows\b/.test(t)
+  )
+    return true;
+  if (
+    /\bwindows\s+(?:1[01]|server\s*202)\b/.test(t) &&
+    /\b(?:insider|preview|update|patch|build|kb\d|cumulative|servicing|version)\b/.test(t)
+  )
+    return true;
+  if (/\bpatch tuesday\b/.test(t) && /\b(microsoft|windows)\b/.test(t)) return true;
+
+  if (
+    /\b(?:macos|mac os x|ipados|watchos|tvos|visionos)\b/.test(t) &&
+    /\b(?:beta|update|preview|release|security|features|available|rolls out|announces|developer)\b/.test(
+      t
+    )
+  )
+    return true;
+
+  if (/\bios\s+\d{2}\b/.test(t) && /\b(?:beta|update|developer|public preview|rc\b)\b/.test(t))
+    return true;
+
+  if (/\b(xcode|testflight)\b/.test(t)) return true;
+
+  return false;
+}
+
+function refineHardwareSectionIfSoftwareStory(c: Collected): Collected {
+  if (c.section !== 'HARDWARE') return c;
+  const blob = `${c.title}\n${c.link}`;
+  if (!looksLikeSoftwareStoryFromHardwareFeed(blob)) return c;
+  return { ...c, section: 'TECH' };
 }
 
 type Collected = {
@@ -590,6 +693,8 @@ async function runNewsAgent() {
     throw new Error('No stories parsed from any feed — check URLs or network.');
   }
 
+  collected = collected.map(refineHardwareSectionIfSoftwareStory);
+
   // Freshness gate + same-run de-dupe + cross-day anti-repeat memory.
   collected = collected.filter(isFreshForSection);
   const sameRunSeen = new Set<string>();
@@ -666,8 +771,10 @@ async function runNewsAgent() {
 
   const localColorBlock = `
 **LINDEN HILLS / NEIGHBORHOOD + LOCAL BUSINESS (before the fixed END lines — NOT optional):**
-- **1–2 short lines** of local color near **${LOCAL_INTERSECTION_CENTER}** (Lake Harriet, morning-on-the-block tone, etc.).
-- **Non-negotiable:** The spoken name **${localBizName}** must appear **exactly once** in **COLUMN B (ON AIR)**, in this close segment **before** “BACK TO THE SOLDERING IRON…” — plain conversational passing — ${localBizPitch} (coffee run, walked by, neighbors, whatever fits). **Do not** use **shoutout**, **shout-out**, **plug**, or hard-sell / “GO CHECK THEM OUT.”
+- **Early record:** You usually tape **early in the morning** — assume **most shops are still closed.** The close is a **friendly neighbor plug** for **${localBizName}** (${localBizPitch}): walk-by / love-the-block energy, **not** “they’re open right now” unless you’re clearly joking about bankers’ hours.
+- **Optional one-breath color:** If it fits naturally, you may nod that **${LOCAL_EARLY_MORNING_SHOPS}** are among the few early risers on the corridor — **never** as a substitute for saying **${localBizName}** exactly **once** by name.
+- **1–2 short lines** of color near **${LOCAL_INTERSECTION_CENTER}** (Lake Harriet, block-quiet, etc.).
+- **Non-negotiable:** The spoken name **${localBizName}** must appear **exactly once** in **COLUMN B (ON AIR)** in this close segment **before** “BACK TO THE SOLDERING IRON…” Avoid **shout-out** / influencer clichés, **hard sell**, or “GO CHECK THEM OUT.”
 - If you omit **${localBizName}** from ON AIR, the script is **wrong**.${localBizNote ? `\n- Extra note: ${localBizNote}` : ''}`;
 
   const segmentOrderBlock = hasWolves
@@ -712,7 +819,7 @@ ${localColorBlock}
 - **Do not** put [B-ROLL] or shot notes in ON AIR.
 - START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. AND WE'VE GOT A LOT HITTING THE SHOP TODAY.
 - **Enunciation (INLINE):** phonetic in parentheses **on first mention only** next to the word — short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye). Real acronyms spelled: A I, G P U.
-- **Close:** After your last **news** beat, **before** the two fixed END lines: **one** tight **ALL CAPS** line (two only if still under word budget) mixing **Linden Hills** color with **${localBizName}** spoken **once** by name (required — see LINDEN HILLS block). Never **shoutout**, **shout-out**, **plug**, or hard-sell.
+- **Close:** After your last **news** beat, **before** the two fixed END lines: **one** tight **ALL CAPS** line (two only if still under word budget) mixing **Linden Hills** color with **${localBizName}** spoken **once** by name (required — see LINDEN HILLS block). Never **shoutout**, **shout-out**, **hard-sell**, or “GO CHECK THEM OUT” (friendly neighbor plug is OK — see LINDEN HILLS block).
 - END exactly (literal, final two sentences of ON AIR): BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
 
 ---
@@ -726,7 +833,7 @@ ${localColorBlock}
 (Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **3 typical, 4 maximum**, never more. E.g. \`2,5,7\` = story **2**, then **5**, then **7**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
 
 <<<SOCIAL>>>
-(**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**, 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler. No “link in bio,” no explaining screenshots. Threads-length.)
+(**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**, 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler. **Write in sentence case** (normal Facebook / Instagram style): capitalize the first word and proper nouns only. **Do not** use ALL CAPS, title case for the whole paragraph, or fake emphasis — platforms flag shouty text as low quality. Standard tech spellings are fine (OpenAI, iPhone, GPU). No “link in bio,” no explaining screenshots. Threads-length.)
 `;
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -829,7 +936,9 @@ ${localColorBlock}
     .filter((c) => c.link);
 
   const socialHeadline = formatSocialHeadline();
-  let socialBody = stripHashtagLines(modelSocial.trim());
+  let socialBody = normalizeSocialBodySentenceCase(
+    stripHashtagLines(modelSocial.trim())
+  );
   if (!socialBody) socialBody = fallbackSocialBodyFromUsed(used);
   const topicTags = topicTagsFromText(
     [socialBody, ...used.map((u) => u.title)].join(' ')
@@ -991,7 +1100,7 @@ ${localColorBlock}
 
   const onAirHeader = 'ON AIR (teleprompter / VO)';
   const socialHeader =
-    'SOCIAL — Tech News Daily with Kyle (video caption / description)';
+    'Social — Tech News Daily with Kyle (video caption / description)';
   const ytVerifyHeader =
     'YOUTUBE — paste this exact line in the video description (proves which episode this Short is for)';
   const ytVerifyLine = buildEpisodeVerificationToken(chicagoDateSlug());

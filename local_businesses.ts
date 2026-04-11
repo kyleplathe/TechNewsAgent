@@ -140,6 +140,12 @@ const BUSINESSES_43RD_UPTON: LocalBusiness[] = [
     tags: ['bakery', 'bread', 'artisan'],
   },
   {
+    name: "Sebastian Joe's",
+    category: 'Ice Cream / Cafe',
+    description: 'Neighborhood ice cream and coffee — early morning hours',
+    tags: ['ice-cream', 'coffee', 'breakfast'],
+  },
+  {
     name: 'Sebesta Apothecary',
     category: 'Retail',
     description: 'Sustainable bath, body, and home cleaning products',
@@ -158,3 +164,7 @@ export function pickLocalBusiness(): LocalBusiness {
 }
 
 export const LOCAL_INTERSECTION_CENTER = '43rd St W & Upton Ave S';
+
+/** Referenced in the Gemini prompt when taping before most shops open (optional color, not the daily rotation pick). */
+export const LOCAL_EARLY_MORNING_SHOPS =
+  "Breadsmith, Jones Coffee, and Sebastian Joe's";

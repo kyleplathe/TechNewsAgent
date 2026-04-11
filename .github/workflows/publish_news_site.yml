@@ -1,25 +1,12 @@
 # YouTube sync helper for an already-published `/news` episode.
 # Daily workflow now handles the post JSON update automatically on email send.
 # This workflow only verifies/syncs the YouTube Short into existing `public/news`.
+# Run with no inputs: uses newest manifest slug + auto-discovers the Short by TND-{slug} in the description.
 
 name: Publish Tech News to Instakyle
 
 'on':
   workflow_dispatch:
-    inputs:
-      youtube_url:
-        description: 'Optional YouTube URL (watch/shorts/youtu.be) to verify + sync while publishing'
-        required: false
-        type: string
-      auto_find_youtube:
-        description: 'If true, auto-find YouTube by TND token when youtube_url is blank'
-        required: false
-        type: boolean
-        default: true
-      slug:
-        description: 'Optional episode slug YYYY-MM-DD (defaults to newest manifest item slug)'
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -52,11 +39,6 @@ jobs:
         id: slug
         run: |
           set -euo pipefail
-          if [ -n "${{ inputs.slug }}" ]; then
-            echo "slug=${{ inputs.slug }}" >> "$GITHUB_OUTPUT"
-            echo "Using slug from input: ${{ inputs.slug }}"
-            exit 0
-          fi
           MANIFEST="${GITHUB_WORKSPACE}/instakyle-site/public/news/manifest.json"
           if [ ! -f "$MANIFEST" ]; then
             echo "::error::manifest.json not found at $MANIFEST"
@@ -71,23 +53,15 @@ jobs:
           echo "Using newest manifest slug: ${SLUG}"
 
       - name: Verify YouTube and sync episode
-        if: ${{ inputs.youtube_url != '' || inputs.auto_find_youtube == true }}
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
         run: |
           set -e
           SYNC_SLUG="${{ steps.slug.outputs.slug }}"
-          ARGS=( --news-dir "${GITHUB_WORKSPACE}/instakyle-site/public/news" )
-          if [ -n "${{ inputs.youtube_url }}" ]; then
-            ARGS+=( --youtube-url "${{ inputs.youtube_url }}" )
-          else
-            if [ -n "${YOUTUBE_CHANNEL_ID}" ]; then
-              ARGS+=( --channel-id "${YOUTUBE_CHANNEL_ID}" )
-            fi
-          fi
-          if [ -n "$SYNC_SLUG" ]; then
-            ARGS+=( --slug "$SYNC_SLUG" )
+          ARGS=( --news-dir "${GITHUB_WORKSPACE}/instakyle-site/public/news" --slug "$SYNC_SLUG" )
+          if [ -n "${YOUTUBE_CHANNEL_ID}" ]; then
+            ARGS+=( --channel-id "${YOUTUBE_CHANNEL_ID}" )
           fi
           npx tsx scripts/youtube-verify-and-sync.ts "${ARGS[@]}"
 

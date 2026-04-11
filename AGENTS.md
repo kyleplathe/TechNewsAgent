@@ -43,7 +43,7 @@ If the email looks truncated or missing a column, check Gemini `maxOutputTokens`
 
 ## Voiceover length (~90s desk)
 
-Target **one take ~85–100s** (~**90s**). Best practice for a **daily reporter**: **one beat → one point → one proof** (headline + why it matters + a single concrete detail — number, name, mechanism — when the story gives it). Skip beats that need a paragraph; skip essay transitions. Close stays short (neighborhood + sign-off). Gemini prompt steers **away** from hype / podcast clichés (“hold on to your hats,” “deep dive,” “buckle up,” etc.) — calm bench voice, not trailer energy.
+Target **one take ~90s** (**~85–95s** window; prompt budgets **~175–215 spoken words** between fixed START/END). **3 stories in `<<<SOURCES>>>` typical, 4 maximum.** Story list in the prompt is **newest-first** so the model favors fresh headlines. Best practice: **one beat → one point → one proof** on main stories; optional skate/Wolves kept to **one sentence** when both appear. Close stays short (neighborhood + sign-off). Gemini prompt steers **away** from hype / podcast clichés — calm bench voice, not trailer energy.
 
 ## CI schedule
 
@@ -59,7 +59,7 @@ If **`public/news/posts/YYYY-MM-DD.json`** already exists on the Instakyle defau
 
 **`NEWS_SITE_PUBLISH_MODE` (repo variable)**  
 - **`auto`** (default): after email, push Instakyle `public/news` when not blocked by the rule above.  
-- **`manual`**: after email, **no push** — only the artifact. Copy **`manifest.json`** from the live site into staging first so the merged manifest keeps older episodes. Run workflow **Publish Tech News to Instakyle** when you’re ready (e.g. after filming). Use optional input **`source_run_id`** if “latest success” isn’t the run that matches your show; set **`force_replace_today`** to overwrite an episode already live.
+- **`manual`**: after email, **no push** — only the artifact. Copy **`manifest.json`** from the live site into staging first so the merged manifest keeps older episodes. Run workflow **Publish Tech News to Instakyle** when you’re ready (e.g. after filming); it needs **no inputs** (newest episode from **`manifest.json`** + YouTube auto-discovery).
 
 **Secrets / vars for site publish**
 
@@ -72,13 +72,13 @@ If **`public/news/posts/YYYY-MM-DD.json`** already exists on the Instakyle defau
 | `TECHNEWS_INSTAKYLE_SCREENSHOTS` | Optional | `1` to write `posts/images/…` on Instakyle; default **off** (email JPEGs unchanged). |
 | `TECHNEWS_VIDEO_URL` | Optional secret | That day’s video link on the post page. |
 | `YOUTUBE_API_KEY` | For optional YouTube verify/sync in **Publish Tech News to Instakyle** | Google Cloud: enable **YouTube Data API v3**, restrict key to that API. Repo **Actions secret**; used to read `videos.list` and `search.list`. |
-| `YOUTUBE_CHANNEL_ID` | Optional but recommended | Repo variable (e.g. `UC...`) to constrain auto-discovery to your channel when `youtube_url` is blank. |
+| `YOUTUBE_CHANNEL_ID` | Optional but recommended | Repo variable (e.g. `UC...`) to constrain YouTube search to your channel during auto-discovery. |
 
 **YouTube embed + verified link**
 
 - Post JSON from `web_publish` includes **`episodeVerificationToken`** (`TND-{Chicago slug}`) and, after sync, **`youtubeVideoId`** + **`videoUrl`**. Re-running the daily agent the same day **preserves** synced `youtubeVideoId` / `videoUrl` when `TECHNEWS_VIDEO_URL` is unset.
 - **`web/technews.html`** shows a responsive embed when `youtubeVideoId` or a parseable `videoUrl` is present.
-- Workflow **Publish Tech News to Instakyle** now handles **YouTube sync only** (post JSON is already published by Daily email flow). **Actions → Run workflow** after filming. Provide optional `slug` or it uses the newest `manifest.json` item. If `youtube_url` is blank, it auto-searches YouTube by the `TND-YYYY-MM-DD` token (optionally constrained by **`YOUTUBE_CHANNEL_ID`**) and syncs when found; if not found after retries, the workflow fails so you can rerun once indexing catches up.
+- Workflow **Publish Tech News to Instakyle** handles **YouTube sync only** (post JSON is already published by the daily flow). **Actions → Run workflow** after filming (**no form fields**): it uses the **newest** `manifest.json` slug, auto-searches YouTube by the `TND-YYYY-MM-DD` token (optionally constrained by **`YOUTUBE_CHANNEL_ID`**), verifies the token in the video description, then pushes. If not found after retries, the workflow fails so you can rerun once indexing catches up. For a **specific** slug or explicit URL, use the local `npm run youtube:sync` command below.
 
 Local (explicit URL): `YOUTUBE_API_KEY=... npm run youtube:sync -- --youtube-url "…" --news-dir /path/to/public/news`
 Local (auto-discover by token): `YOUTUBE_API_KEY=... npm run youtube:sync -- --news-dir /path/to/public/news --allow-missing`
