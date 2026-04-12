@@ -429,6 +429,38 @@ function normalizeText(s: string): string {
     .trim();
 }
 
+function spokenNameAppearsInOnAir(onAir: string, bizName: string): boolean {
+  const squash = (s: string) =>
+    normalizeText(s).replace(/\s+/g, '');
+  const hay = squash(onAir);
+  const needle = squash(bizName);
+  if (!needle) return false;
+  if (hay.includes(needle)) return true;
+  const words = bizName.split(/\s+/).filter((w) => {
+    const core = w.replace(/[^a-z0-9]/gi, '');
+    return core.length >= 3;
+  });
+  return words.length > 0 && words.every((w) => hay.includes(squash(w)));
+}
+
+/**
+ * Gemini sometimes drops the required neighbor close. Inject one ALL CAPS line with the business
+ * name before the fixed END lines when it’s missing.
+ */
+function ensureLocalBusinessInOnAir(onAir: string, bizName: string): string {
+  const t = onAir.trim();
+  const name = bizName.trim();
+  if (!name) return t;
+  if (spokenNameAppearsInOnAir(t, name)) return t;
+  const insert = `${name.toUpperCase()} — QUICK NEIGHBOR NOD BY ${LOCAL_INTERSECTION_CENTER}.`;
+  const re = /^([\s\S]*?)(BACK TO THE SOLDERING IRON\b[\s\S]*)$/im;
+  const m = t.match(re);
+  if (m && m[1] !== undefined && m[2] !== undefined) {
+    return `${m[1].trim()}\n\n${insert}\n\n${m[2].trim()}`;
+  }
+  return `${t}\n\n${insert}\n\nBACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.`;
+}
+
 function titleFingerprint(title: string): string {
   const stop = new Set([
     'the', 'a', 'an', 'and', 'or', 'for', 'to', 'of', 'in', 'on', 'at', 'with',
@@ -962,6 +994,12 @@ ${localColorBlock}
     parseStudioOutput(rawOut, collected.length);
 
   const fixedOnAir = finalScript.trim();
+  const onAirForEmail = ensureLocalBusinessInOnAir(fixedOnAir, localBizName);
+  if (onAirForEmail.trim() !== fixedOnAir.trim()) {
+    console.warn(
+      'ON AIR: Injected a neighbor line with the local business name (model output did not include it).'
+    );
+  }
   /**
    * Default: **`<<<SOURCES>>>` line order** (matches Gemini’s slide / VO sequence).
    * Set **`USE_ON_AIR_SOURCE_REORDER=1`** to re-sort indices by hostname/title hits in ON AIR text
@@ -1110,6 +1148,89 @@ ${localColorBlock}
     console.log('SCREENSHOT_SOURCES disabled — skipping Playwright.');
   }
 
+  const localBizWebsiteResolved =
+    process.env.LOCAL_BIZ_WEBSITE?.trim() || pickedBiz.website?.trim() || '';
+
+  let localSpotlightShot: { filename: string; content: Buffer } | null = null;
+  if (
+    localBizWebsiteResolved &&
+    /^https?:\/\//i.test(localBizWebsiteResolved) &&
+    envScreenshotsEnabled()
+  ) {
+    const { screenshotSources } = await import('./screenshot_sources');
+    const { ok: locOk, failures: locFail } = await screenshotSources([
+      {
+        storyIndex: 98,
+        section: 'LOCAL',
+        title: localBizName,
+        link: localBizWebsiteResolved,
+      },
+    ]);
+    const hit = locOk[0];
+    if (hit) {
+      localSpotlightShot = { filename: hit.filename, content: hit.content };
+    } else {
+      console.warn('Local spotlight screenshot failed:', locFail);
+    }
+  } else if (!localBizWebsiteResolved) {
+    console.warn(
+      'LOCAL SPOTLIGHT: No business website URL — set LOCAL_BIZ_WEBSITE or add optional `website` on entries in local_businesses.ts for a storefront grab and email JPEG.'
+    );
+  } else if (!envScreenshotsEnabled()) {
+    console.warn(
+      'LOCAL SPOTLIGHT: SCREENSHOT_SOURCES is off — no storefront JPEG (website link can still appear in the email).'
+    );
+  }
+
+  const maxBytesAttach = Math.min(
+    38 * 1024 * 1024,
+    Math.max(
+      5 * 1024 * 1024,
+      parseInt(process.env.SCREENSHOT_MAX_TOTAL_BYTES ?? '34000000', 10) ||
+        34_000_000
+    )
+  );
+  const emailAttachments: Array<{
+    filename: string;
+    content: Buffer;
+    contentType?: string;
+  }> = [...(attachments ?? [])];
+  if (localSpotlightShot) {
+    const totalSoFar = emailAttachments.reduce((n, a) => n + a.content.length, 0);
+    if (totalSoFar + localSpotlightShot.content.length <= maxBytesAttach) {
+      emailAttachments.push({
+        filename: localSpotlightShot.filename,
+        content: localSpotlightShot.content,
+        contentType: 'image/jpeg',
+      });
+    } else {
+      console.warn(
+        'LOCAL SPOTLIGHT: attachment skipped — would exceed SCREENSHOT_MAX_TOTAL_BYTES.'
+      );
+    }
+  }
+
+  let localSpotlightBannerText = '';
+  let localSpotlightBannerHtml = '';
+  if (localBizWebsiteResolved && /^https?:\/\//i.test(localBizWebsiteResolved)) {
+    const locLines = [
+      'LOCAL SPOTLIGHT (neighbor business — say the name once in the ON AIR close; JPEG attached when capture succeeds)',
+      localBizName,
+      localBizWebsiteResolved,
+      localSpotlightShot
+        ? `Screenshot: ${localSpotlightShot.filename}`
+        : '(No storefront JPEG this run — see log / SCREENSHOT_SOURCES / size limit)',
+    ];
+    localSpotlightBannerText = `\n${locLines.join('\n')}\n`;
+    localSpotlightBannerHtml =
+      `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Local spotlight</p>` +
+      `<p style="margin:0 0 0.35em;font-size:14px;line-height:1.4">${escapeHtml(localBizName)}</p>` +
+      `<p style="margin:0 0 0.75em;font-size:13px;word-break:break-all"><a href="${escapeHtml(localBizWebsiteResolved)}">${escapeHtml(localBizWebsiteResolved)}</a></p>` +
+      (localSpotlightShot
+        ? `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(`JPEG: ${localSpotlightShot.filename}`)}</p>`
+        : `<p style="font-size:12px;color:#a16207;margin:0 0 1em">No storefront JPEG this run.</p>`);
+  }
+
   const resendKey = process.env.RESEND_API_KEY;
   const toRaw = process.env.RESEND_TO?.trim();
   const configuredFrom = process.env.RESEND_FROM?.trim() || '';
@@ -1161,7 +1282,7 @@ ${localColorBlock}
     tickerLine,
     '',
     onAirHeader,
-    fixedOnAir.trim(),
+    onAirForEmail.trim(),
     '',
     socialHeader,
     socialCaption,
@@ -1172,6 +1293,7 @@ ${localColorBlock}
     linksHeader,
     '',
     linksText || '(none)',
+    localSpotlightBannerText.trimEnd(),
     screenshotBannerText.trimEnd(),
   ]
     .filter((block) => block.length > 0)
@@ -1181,13 +1303,14 @@ ${localColorBlock}
     `<div style="font-family:system-ui,sans-serif;max-width:760px;color:#111">` +
     tickerHtml +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(onAirHeader)}</p>` +
-    `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd">${escapeHtml(fixedOnAir.trim())}</pre>` +
+    `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd">${escapeHtml(onAirForEmail.trim())}</pre>` +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(socialHeader)}</p>` +
     socialCaptionHtml +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(ytVerifyHeader)}</p>` +
     `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.25em;padding:12px;background:#fefce8;border-radius:8px;border:1px solid #eab308;user-select:all;-webkit-user-select:all">${escapeHtml(ytVerifyLine)}</pre>` +
     `<p style="font-size:12px;font-weight:700;color:#444;margin:0 0 0.5em">${escapeHtml(linksHeader)}</p>` +
     `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.45">${linksHtml}</div>` +
+    localSpotlightBannerHtml +
     screenshotBannerHtml +
     `</div>`;
 
@@ -1207,10 +1330,10 @@ ${localColorBlock}
       const res = await resend.emails.send({
         from,
         to,
-        subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}${attachments?.length ? ' 📎' : ''}`,
+        subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}${emailAttachments.length ? ' 📎' : ''}`,
         text: emailText,
         html: emailHtml,
-        ...(attachments?.length ? { attachments } : {}),
+        ...(emailAttachments.length ? { attachments: emailAttachments } : {}),
       });
 
       if (!res.error) {
@@ -1257,8 +1380,6 @@ ${localColorBlock}
   const webDir = process.env.TECHNEWS_WEB_DIR?.trim();
   const instakyleNewsDir = process.env.TECHNEWS_INSTAKYLE_NEWS_DIR?.trim();
   const techNewsVideoUrl = process.env.TECHNEWS_VIDEO_URL?.trim() || null;
-  const localBizWebsiteResolved =
-    process.env.LOCAL_BIZ_WEBSITE?.trim() || pickedBiz.website?.trim() || '';
 
   if ((webDir || instakyleNewsDir) && used.length) {
     let localSpotlightForWeb: {
@@ -1274,27 +1395,13 @@ ${localColorBlock}
       localSpotlightForWeb = {
         websiteUrl: localBizWebsiteResolved,
         businessName: localBizName,
+        ...(localSpotlightShot
+          ? {
+              imageFilename: localSpotlightShot.filename,
+              imageBuffer: localSpotlightShot.content,
+            }
+          : {}),
       };
-      if (envScreenshotsEnabled()) {
-        const { screenshotSources } = await import('./screenshot_sources');
-        const { ok: locShots } = await screenshotSources([
-          {
-            storyIndex: 98,
-            section: 'LOCAL',
-            title: localBizName,
-            link: localBizWebsiteResolved,
-          },
-        ]);
-        const hit = locShots[0];
-        if (hit) {
-          localSpotlightForWeb = {
-            websiteUrl: localBizWebsiteResolved,
-            businessName: localBizName,
-            imageFilename: hit.filename,
-            imageBuffer: hit.content,
-          };
-        }
-      }
     }
 
     const { writeTechNewsWebBundle } = await import('./web_publish');
@@ -1319,7 +1426,7 @@ ${localColorBlock}
       tickerLine,
       socialCaption,
       videoPrompt: '',
-      onAirPlain: fixedOnAir.trim(),
+      onAirPlain: onAirForEmail.trim(),
       stories: webStories,
       seoKeywords,
       ...(localSpotlightForWeb ? { localSpotlight: localSpotlightForWeb } : {}),

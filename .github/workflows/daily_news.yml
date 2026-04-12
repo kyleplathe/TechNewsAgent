@@ -105,6 +105,8 @@ jobs:
           FEED_ITEM_LIMIT: ${{ vars.FEED_ITEM_LIMIT }}
           # Optional: set to 0/false to skip JPEG attachments (saves CI time).
           SCREENSHOT_SOURCES: ${{ vars.SCREENSHOT_SOURCES }}
+          # Optional: storefront URL for the day’s local spotlight screenshot + email block (overrides rotation `website` in local_businesses.ts).
+          LOCAL_BIZ_WEBSITE: ${{ vars.LOCAL_BIZ_WEBSITE }}
           # After a successful Resend send: writes under this directory (see Resolve step).
           TECHNEWS_INSTAKYLE_NEWS_DIR: ${{ steps.instakyle_news.outputs.dir }}
           TECHNEWS_SITE_ORIGIN: ${{ vars.TECHNEWS_SITE_ORIGIN }}

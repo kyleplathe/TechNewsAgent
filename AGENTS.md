@@ -37,6 +37,8 @@ Markers in model output: `<<<ON_AIR>>>`, `<<<SOURCES>>>` (one line of comma-sepa
 
 Post JSON includes **`seoKeywords`** (neighborhood + business + story tokens) and optional **`localSpotlight`** (**Local Spotlight** — business URL + screenshot) when `LOCAL_BIZ_WEBSITE` or the rotation entry has a **`website`** URL.
 
+The **daily email** also includes a **Local spotlight** block (name + URL + JPEG when Playwright succeeds) and **injects** the business name into **ON AIR** if Gemini omitted it. CI: optional repo variable **`LOCAL_BIZ_WEBSITE`** (see workflow `env`) overrides the rotation’s `website` field.
+
 If the email looks truncated or missing a column, check Gemini `maxOutputTokens` and API errors; markers must be exact.
 
 ## Screenshots (`screenshot_sources.ts`)
