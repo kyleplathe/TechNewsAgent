@@ -9,6 +9,9 @@ node_modules/
 # OS / editor
 .DS_Store
 
+# Story repeat / cooldown state (local only — see tech_news_agent.ts airlog)
+.agent-memory/
+
 # Optional local output for TECHNEWS_WEB_DIR
 technews-publish/
 
