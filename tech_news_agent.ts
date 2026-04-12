@@ -10,6 +10,7 @@ import {
   LOCAL_EARLY_MORNING_SHOPS,
   LOCAL_INTERSECTION_CENTER,
   pickLocalBusiness,
+  type LocalBusiness,
 } from './local_businesses';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
@@ -81,6 +82,9 @@ function formatSocialHeadline(): string {
 
 const THREADS_CAP = 500;
 
+const SOCIAL_READ_MORE_NEWS =
+  'Read all the latest Tech News articles at instakyle.tech/news';
+
 function buildShortTagsFromUsed(used: Collected[]): string {
   const tags = ['#TechNews'];
   if (used.some((c) => c.section === 'LOCAL')) tags.push('#Timberwolves');
@@ -126,14 +130,19 @@ function finalizeSocialCaption(
   body: string,
   tags: string
 ): string {
+  const ctaBlock = `\n\n${SOCIAL_READ_MORE_NEWS}\n\n`;
   let b = body.trim().replace(/\s+/g, ' ').slice(0, 400);
   if (!b) b = 'Daily roundup from the bench.';
-  let s = `${headline}\n\n${b}\n\n${tags}`;
+  let s = `${headline}\n\n${b}${ctaBlock}${tags}`;
   if (s.length <= THREADS_CAP) return s;
-  const overhead = headline.length + tags.length + 4;
+  const overhead =
+    headline.length +
+    tags.length +
+    ctaBlock.length +
+    4; /* two newlines around body */
   const maxBody = Math.max(40, THREADS_CAP - overhead - 1);
   b = b.slice(0, Math.max(1, maxBody - 1)) + '…';
-  s = `${headline}\n\n${b}\n\n${tags}`;
+  s = `${headline}\n\n${b}${ctaBlock}${tags}`;
   return s.length <= THREADS_CAP ? s : s.slice(0, THREADS_CAP);
 }
 
@@ -200,12 +209,45 @@ function normalizeSocialBodySentenceCase(body: string): string {
 
 function mapSectionForBlog(
   section: Collected['section']
-): 'Software' | 'Hardware' | 'Skate' | 'Local' | 'Tech Repair' {
+): 'Software' | 'Hardware' | 'Skate' | 'Timberwolves' | 'Tech Repair' {
   if (section === 'TECH') return 'Software';
   if (section === 'HARDWARE') return 'Hardware';
   if (section === 'SKATE') return 'Skate';
-  if (section === 'LOCAL') return 'Local';
+  if (section === 'LOCAL') return 'Timberwolves';
   return 'Tech Repair';
+}
+
+/** Post JSON `seoKeywords` — neighborhood + episode + local business discovery. */
+function buildSeoKeywords(biz: LocalBusiness, used: Collected[]): string[] {
+  const fromStories = used
+    .flatMap((u) => normalizeText(u.title).split(/\s+/))
+    .filter((w) => w.length >= 4 && /^[a-z0-9]+$/i.test(w))
+    .slice(0, 24);
+  const base = [
+    'Tech News Daily',
+    'Kyle Plathe',
+    'Linden Hills',
+    'Minneapolis',
+    '43rd and Upton',
+    'Lake Harriet',
+    'Southwest Minneapolis',
+    biz.name,
+    biz.category,
+    ...biz.tags,
+    ...fromStories,
+  ];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of base) {
+    const k = raw.trim();
+    if (!k) continue;
+    const lower = k.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    out.push(k);
+    if (out.length >= 48) break;
+  }
+  return out;
 }
 
 /**
@@ -432,15 +474,15 @@ function parseDateSafe(v: string): Date | null {
 }
 
 /**
- * Default freshness (hours). Tech is tight so you are not voicing yesterday’s cycle; override per
- * section with MAX_STORY_AGE_HOURS_TECH, _HARDWARE, _SKATE, _LOCAL, _REPAIR in `.env`.
+ * Default freshness (hours). Override per section with `MAX_STORY_AGE_HOURS_TECH`, `_HARDWARE`,
+ * `_SKATE`, `_LOCAL`, `_REPAIR` in `.env`.
  */
 const DEFAULT_MAX_STORY_AGE_HOURS: Record<Collected['section'], number> = {
-  LOCAL: 24,
-  REPAIR: 24,
-  SKATE: 24,
-  TECH: 12,
-  HARDWARE: 24,
+  LOCAL: 18,
+  REPAIR: 18,
+  SKATE: 18,
+  TECH: 18,
+  HARDWARE: 18,
 };
 
 function maxStoryAgeMsForSection(section: Collected['section']): number {
@@ -781,7 +823,7 @@ async function runNewsAgent() {
     ? `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with the strongest **TECH**/**HARDWARE** headline.
 2) **TECH block** — **1–2** beats from **[TECH]** + **[HARDWARE]** (software, AI, hardware, gaming industry, **Bitcoin** when the headline is Bitcoin-specific) — **freshest and most newsworthy**, not “cover everything.”
-3) **OPTIONAL: SKATE and/or WOLVES** — **prefer one** quick hit: **[SKATE]** or a fresh **Wolves** beat from **[LOCAL]** (Canis Hoopus + **NBA.com** index). Only use **both** if each is **one short sentence** and you stay under the ON AIR word budget; otherwise skip to close.
+3) **OPTIONAL: WOLVES then SKATE** — if you include sports, cover a fresh **Wolves** beat from **[LOCAL]** (Canis Hoopus + **NBA.com** index) **before** any **[SKATE]** line. **Prefer at most one** of Wolves or skate; only use **both** if Wolves comes **first**, each is **one short sentence**, and you stay under the ON AIR word budget; otherwise skip to close.
 4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`
     : `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with the strongest **TECH**/**HARDWARE** headline.
@@ -797,7 +839,7 @@ ${storyListText}
 
 QUALITY RULES:
 ${storyPickRule}
-- **Recency (critical):** The list is **pre-filtered** for freshness (tech ~**12h**; repair/hardware/skate/local ~**24h** by default). Treat everything as **today’s desk** — not “yesterday” or “overnight” unless the item’s date is clearly **today** in US **Central**. Skip stale vibes, republished “classics,” and year-stamped reruns unless the headline proves it’s **new today**. If a headline includes “(2024)” or an old year, it is usually **not** breaking — either skip or frame as “making the rounds again,” not fresh news.
+- **Recency (critical):** The list is **pre-filtered** for freshness (**~18 hours** per section by default). Treat everything as **today’s desk** — not “yesterday” or “overnight” unless the item’s date is clearly **today** in US **Central**. Skip stale vibes, republished “classics,” and year-stamped reruns unless the headline proves it’s **new today**. If a headline includes “(2024)” or an old year, it is usually **not** breaking — either skip or frame as “making the rounds again,” not fresh news.
 - Do not invent products, prices, or dates. Stay close to the headlines.
 - **Digital money / chains:** The show is **Bitcoin-only**. Do **not** cover altcoins, stablecoins, NFT/DeFi/Web3 industry, or generic **“crypto”** as an asset class. **Do** cover **Bitcoin** when a sourced headline is clearly about Bitcoin (ETFs, adoption, mining, Lightning, regulation aimed at Bitcoin, etc.). On air, avoid saying **“crypto”** as a bucket — say **Bitcoin** or neutral tech wording.
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
@@ -921,14 +963,14 @@ ${localColorBlock}
 
   const fixedOnAir = finalScript.trim();
   /**
-   * Email, screenshots, and blog `stories` follow ON AIR order: we re-sort the `<<<SOURCES>>>`
-   * indices by first match of hostname / title tokens in the normalized ON AIR text.
-   * Set **`USE_SOURCES_LINE_ORDER=1`** to keep the model’s `<<<SOURCES>>>` line order instead.
+   * Default: **`<<<SOURCES>>>` line order** (matches Gemini’s slide / VO sequence).
+   * Set **`USE_ON_AIR_SOURCE_REORDER=1`** to re-sort indices by hostname/title hits in ON AIR text
+   * (legacy heuristic; can diverge from the model’s `<<<SOURCES>>>` line).
    */
   const orderedIndices =
-    process.env.USE_SOURCES_LINE_ORDER?.trim() === '1'
-      ? indices
-      : reorderIndicesToMatchOnAir(indices, collected, fixedOnAir);
+    process.env.USE_ON_AIR_SOURCE_REORDER?.trim() === '1'
+      ? reorderIndicesToMatchOnAir(indices, collected, fixedOnAir)
+      : indices;
 
   const used = orderedIndices
     .map((i) => collected[i - 1])
@@ -1215,8 +1257,49 @@ ${localColorBlock}
   const webDir = process.env.TECHNEWS_WEB_DIR?.trim();
   const instakyleNewsDir = process.env.TECHNEWS_INSTAKYLE_NEWS_DIR?.trim();
   const techNewsVideoUrl = process.env.TECHNEWS_VIDEO_URL?.trim() || null;
+  const localBizWebsiteResolved =
+    process.env.LOCAL_BIZ_WEBSITE?.trim() || pickedBiz.website?.trim() || '';
+
   if ((webDir || instakyleNewsDir) && used.length) {
+    let localSpotlightForWeb: {
+      websiteUrl: string;
+      businessName: string;
+      imageFilename?: string;
+      imageBuffer?: Buffer;
+    } | null = null;
+    if (
+      localBizWebsiteResolved &&
+      /^https?:\/\//i.test(localBizWebsiteResolved)
+    ) {
+      localSpotlightForWeb = {
+        websiteUrl: localBizWebsiteResolved,
+        businessName: localBizName,
+      };
+      if (envScreenshotsEnabled()) {
+        const { screenshotSources } = await import('./screenshot_sources');
+        const { ok: locShots } = await screenshotSources([
+          {
+            storyIndex: 98,
+            section: 'LOCAL',
+            title: localBizName,
+            link: localBizWebsiteResolved,
+          },
+        ]);
+        const hit = locShots[0];
+        if (hit) {
+          localSpotlightForWeb = {
+            websiteUrl: localBizWebsiteResolved,
+            businessName: localBizName,
+            imageFilename: hit.filename,
+            imageBuffer: hit.content,
+          };
+        }
+      }
+    }
+
     const { writeTechNewsWebBundle } = await import('./web_publish');
+    const bizForSeo: LocalBusiness = { ...pickedBiz, name: localBizName };
+    const seoKeywords = buildSeoKeywords(bizForSeo, used);
     const webStories = used.map((c, j) => {
       const storyIndex = orderedIndices[j]!;
       const shot = screenshotKept.find((k) => k.storyIndex === storyIndex);
@@ -1225,6 +1308,7 @@ ${localColorBlock}
         section: mapSectionForBlog(c.section),
         title: c.title,
         link: c.link,
+        publishedAt: c.date,
         imageFilename: shot?.filename,
         imageBuffer: shot?.content,
       };
@@ -1237,11 +1321,13 @@ ${localColorBlock}
       videoPrompt: '',
       onAirPlain: fixedOnAir.trim(),
       stories: webStories,
+      seoKeywords,
+      ...(localSpotlightForWeb ? { localSpotlight: localSpotlightForWeb } : {}),
       localBusiness: {
-        name: pickedBiz.name,
+        name: localBizName,
         category: pickedBiz.category,
         description: pickedBiz.description,
-        website: pickedBiz.website ?? null,
+        website: localBizWebsiteResolved || null,
       },
       videoUrl: techNewsVideoUrl,
       publicBaseUrl: process.env.TECHNEWS_PUBLIC_BASE_URL?.trim() || undefined,

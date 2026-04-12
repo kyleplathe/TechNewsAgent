@@ -6,7 +6,7 @@ Single Node script (`tech_news_agent.ts`) pulls RSS (+ NBA.com Timberwolves embe
 
 - **Tech:** Software, AI/ML, hardware & gadgets, gaming (news + industry), developer ecosystem, security when it’s tech news. Sources are listed in `tech_news_agent.ts` (`techFeeds` / `hardwareFeeds`).
 - **Repair:** Tech repair/right-to-repair/serviceability/teardown beats. Tagged as **Tech Repair** on the blog and prioritized first in the on-air rundown when fresh (`repairFeeds`).
-- **Sports:** Timberwolves — Canis Hoopus RSS + `nba_wolves_news.ts` (NBA.com index). Tagged **[LOCAL]**.
+- **Sports:** Timberwolves — Canis Hoopus RSS + `nba_wolves_news.ts` (NBA.com index). Tagged **[LOCAL]** in prompts; blog JSON uses section label **Timberwolves**.
 - **Skate:** Thrasher, Jenkem, Quartersnacks, Village Psychic, The Berrics (best-effort). Tagged **[SKATE]**.
 - **Close:** Linden Hills neighborhood color + **required** one spoken mention of the chosen local business name (from `LOCAL_BIZ_NAME` or `local_businesses.ts` rotation), organic not a hard sell; Gemini prompt treats this as **non-negotiable** in ON AIR before the fixed sign-off.
 - **Digital assets:** **Bitcoin-only** on-air and in headlines (`passesBitcoinOnlyCurrencyRule`). No altcoins, stablecoins, NFT/DeFi/Web3 industry beats. Set `BITCOIN_ONLY_CURRENCY_RULE=0` to disable filtering.
@@ -17,11 +17,11 @@ Default max age (overridable per section):
 
 | Section   | Default hours | Env override                    |
 |----------|---------------|----------------------------------|
-| TECH     | 12            | `MAX_STORY_AGE_HOURS_TECH`       |
-| REPAIR   | 24            | `MAX_STORY_AGE_HOURS_REPAIR`     |
-| HARDWARE | 24            | `MAX_STORY_AGE_HOURS_HARDWARE`   |
-| SKATE    | 24            | `MAX_STORY_AGE_HOURS_SKATE`      |
-| LOCAL    | 24            | `MAX_STORY_AGE_HOURS_LOCAL`      |
+| TECH     | 18            | `MAX_STORY_AGE_HOURS_TECH`       |
+| REPAIR   | 18            | `MAX_STORY_AGE_HOURS_REPAIR`     |
+| HARDWARE | 18            | `MAX_STORY_AGE_HOURS_HARDWARE`   |
+| SKATE    | 18            | `MAX_STORY_AGE_HOURS_SKATE`      |
+| LOCAL    | 18            | `MAX_STORY_AGE_HOURS_LOCAL`      |
 
 Items **without a parseable `pubDate` / Atom date** are **dropped** unless `ALLOW_UNDATED_FEED_ITEMS=1` (escape hatch for broken feeds).
 
@@ -31,7 +31,11 @@ Order: **Ticker** → **ON AIR** (ALL CAPS) → **SOCIAL** caption → **YOUTUBE
 
 Markers in model output: `<<<ON_AIR>>>`, `<<<SOURCES>>>` (one line of comma-separated 1-based story numbers = same numbers as the **numbered list** in the prompt — **which** stories are in the segment), then `<<<SOCIAL>>>` (short Threads-style body; the script prepends the title line and one hashtag line).
 
-**SOURCE LINKS / blog row order (default):** those indices are **re-sorted to match `<<<ON_AIR>>>`** by earliest mention of each story’s link hostname and title tokens (normalized), so the list tracks **spoken order**, not necessarily the comma order in `<<<SOURCES>>>`. Set **`USE_SOURCES_LINE_ORDER=1`** (repo variable or env) to keep the model’s `<<<SOURCES>>>` line order verbatim instead.
+**SOURCE LINKS / email JPEG order (default):** indices follow the model’s **`<<<SOURCES>>>`** line (same order as slide / VO beats). Set **`USE_ON_AIR_SOURCE_REORDER=1`** to re-sort by hostname/title hits in **`<<<ON_AIR>>>`** (legacy heuristic).
+
+**Blog / Instakyle story rows (default):** **`TECHNEWS_BLOG_STORY_ORDER=newest`** — stories are sorted **newest-first** by feed date. Set **`TECHNEWS_BLOG_STORY_ORDER=script`** to match email / `<<<SOURCES>>>` order (use when `VIDEO PROMPT` story blocks must align 1:1).
+
+Post JSON includes **`seoKeywords`** (neighborhood + business + story tokens) and optional **`localSpotlight`** (**Local Spotlight** — business URL + screenshot) when `LOCAL_BIZ_WEBSITE` or the rotation entry has a **`website`** URL.
 
 If the email looks truncated or missing a column, check Gemini `maxOutputTokens` and API errors; markers must be exact.
 
@@ -85,7 +89,7 @@ Local (auto-discover by token): `YOUTUBE_API_KEY=... npm run youtube:sync -- --n
 
 ## Secrets / env
 
-Resend, Gemini, `RESEND_TO`, optional `FEED_ITEM_LIMIT`, `SCREENSHOT_*`, `GEMINI_MODEL`, optional `USE_SOURCES_LINE_ORDER` (see **SOURCE LINKS / blog row order** above), etc. Never commit `.env`.
+Resend, Gemini, `RESEND_TO`, optional `FEED_ITEM_LIMIT`, `SCREENSHOT_*`, `GEMINI_MODEL`, optional `USE_ON_AIR_SOURCE_REORDER`, `TECHNEWS_BLOG_STORY_ORDER`, `LOCAL_BIZ_WEBSITE`, etc. Never commit `.env`.
 
 ## TechNews web bundle (optional)
 

@@ -95,6 +95,7 @@ const BUSINESSES_43RD_UPTON: LocalBusiness[] = [
     name: 'Wedge Linden Hills',
     category: 'Grocery',
     description: 'Community-owned co-op specializing in organic produce',
+    website: 'https://wedge.coop',
     tags: ['grocery', 'organic', 'co-op'],
   },
   {

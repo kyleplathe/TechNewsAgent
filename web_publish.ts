@@ -9,6 +9,8 @@ export type WebPublishStoryInput = {
   section: string;
   title: string;
   link: string;
+  /** RSS / Atom `pubDate` — used when `TECHNEWS_BLOG_STORY_ORDER=newest` (default). */
+  publishedAt?: string;
   /** JPEG filename (e.g. 01-slug.jpg) when a screenshot exists for this story */
   imageFilename?: string;
   imageBuffer?: Buffer;
@@ -56,6 +58,21 @@ export type TechNewsWebPayload = {
     category: string;
     description: string;
     website?: string | null;
+  } | null;
+  /**
+   * Neighborhood / episode SEO — surfaced in post JSON for site meta (e.g. Open Graph keywords).
+   */
+  seoKeywords?: string[];
+  /**
+   * Linden Hills local business row: screenshot + link (consumer UI label: **Local Spotlight**).
+   */
+  localSpotlight?: {
+    label: 'Local Spotlight';
+    businessName: string;
+    websiteUrl: string;
+    /** Relative under news root, e.g. `posts/images/YYYY-MM-DD/local-spotlight.jpg` */
+    image: string | null;
+    imageUrl: string | null;
   } | null;
   tickerLine: string;
   socialCaption: string;
@@ -183,6 +200,27 @@ function joinUrl(base: string, rel: string): string {
   const b = base.replace(/\/+$/, '');
   const r = rel.replace(/^\/+/, '');
   return `${b}/${r}`;
+}
+
+/** Default **newest-first** by `publishedAt`; set `TECHNEWS_BLOG_STORY_ORDER=script` for `<<<SOURCES>>>` order. */
+function blogStoryOrderMode(): 'newest' | 'script' {
+  const v = process.env.TECHNEWS_BLOG_STORY_ORDER?.trim().toLowerCase();
+  if (v === 'script' || v === 'sources' || v === 'on_air') return 'script';
+  return 'newest';
+}
+
+function sortStoriesForBlogOrder(
+  stories: WebPublishStoryInput[],
+  mode: 'newest' | 'script'
+): WebPublishStoryInput[] {
+  if (mode === 'script' || stories.length <= 1) return [...stories];
+  return [...stories].sort((a, b) => {
+    const ta = a.publishedAt ? Date.parse(a.publishedAt) : NaN;
+    const tb = b.publishedAt ? Date.parse(b.publishedAt) : NaN;
+    const taN = Number.isFinite(ta) ? ta : Number.NEGATIVE_INFINITY;
+    const tbN = Number.isFinite(tb) ? tb : Number.NEGATIVE_INFINITY;
+    return tbN - taN;
+  });
 }
 
 /**
@@ -368,6 +406,13 @@ export type WriteWebBundleOptions = {
     description: string;
     website?: string | null;
   } | null;
+  seoKeywords?: string[];
+  localSpotlight?: {
+    websiteUrl: string;
+    businessName: string;
+    imageFilename?: string;
+    imageBuffer?: Buffer;
+  } | null;
   /** Optional link embedded in JSON + manifest (e.g. YouTube). */
   videoUrl?: string | null;
   /**
@@ -396,6 +441,8 @@ export async function writeTechNewsWebBundle(
     onAirPlain,
     stories,
     localBusiness = null,
+    seoKeywords,
+    localSpotlight: localSpotlightInput = null,
     videoUrl = null,
     publicBaseUrl,
     siteOrigin,
@@ -409,10 +456,18 @@ export async function writeTechNewsWebBundle(
     throw new Error('writeTechNewsWebBundle: set outDir and/or instakyleNewsDir');
   }
 
+  const blogOrder = blogStoryOrderMode();
+  const storiesOrdered = sortStoriesForBlogOrder(stories, blogOrder);
+  if (blogOrder === 'newest' && stories.length > 1) {
+    console.log(
+      `WEB: blog story order = newest-first (set TECHNEWS_BLOG_STORY_ORDER=script for <<<SOURCES>>> order)`
+    );
+  }
+
   const sections = parseVideoPromptStorySections(videoPrompt);
-  if (sections.length !== stories.length && stories.length > 0) {
+  if (sections.length !== storiesOrdered.length && storiesOrdered.length > 0) {
     console.warn(
-      `WEB: VIDEO PROMPT has ${sections.length} story blocks but ${stories.length} sourced stories — studio headlines may not line up; falling back to feed titles where needed.`
+      `WEB: VIDEO PROMPT has ${sections.length} story blocks but ${storiesOrdered.length} sourced stories — studio headlines may not line up; falling back to feed titles where needed.`
     );
   }
 
@@ -448,8 +503,8 @@ export async function writeTechNewsWebBundle(
   };
 
   const built: BuiltRow[] = [];
-  for (let i = 0; i < stories.length; i++) {
-    const s = stories[i];
+  for (let i = 0; i < storiesOrdered.length; i++) {
+    const s = storiesOrdered[i]!;
     const sec = sections[i];
     built.push({
       storyIndex: s.storyIndex,
@@ -467,6 +522,48 @@ export async function writeTechNewsWebBundle(
 
   const genericBase = publicBaseUrl?.trim().replace(/\/+$/, '') || '';
   const origin = siteOrigin?.trim().replace(/\/+$/, '') || '';
+
+  let localSpotlightGeneric: TechNewsWebPayload['localSpotlight'] = null;
+  let localSpotlightInstakyle: TechNewsWebPayload['localSpotlight'] = null;
+  if (localSpotlightInput?.websiteUrl?.trim() && localSpotlightInput.businessName?.trim()) {
+    const spotlightUrl = localSpotlightInput.websiteUrl.trim();
+    const spotlightName = localSpotlightInput.businessName.trim();
+    const fn =
+      localSpotlightInput.imageFilename?.trim() || 'local-spotlight.jpg';
+    const baseRow = {
+      label: 'Local Spotlight' as const,
+      businessName: spotlightName,
+      websiteUrl: spotlightUrl,
+      image: null as string | null,
+      imageUrl: null as string | null,
+    };
+    if (localSpotlightInput.imageBuffer?.length) {
+      if (genericRoot) {
+        const relG = `images/${fn}`;
+        await mkdir(join(genericRoot, 'images'), { recursive: true });
+        await writeFile(join(genericRoot, relG), localSpotlightInput.imageBuffer);
+        localSpotlightGeneric = {
+          ...baseRow,
+          image: relG,
+          imageUrl: genericBase ? joinUrl(genericBase, relG) : null,
+        };
+      }
+      if (instakyleRoot) {
+        const relI = `posts/images/${slug}/${fn}`;
+        await mkdir(join(instakyleRoot, dirname(relI)), { recursive: true });
+        await writeFile(join(instakyleRoot, relI), localSpotlightInput.imageBuffer);
+        const abs = origin ? joinUrl(origin, joinUrl('news', relI)) : null;
+        localSpotlightInstakyle = {
+          ...baseRow,
+          image: relI,
+          imageUrl: abs,
+        };
+      }
+    } else {
+      if (genericRoot) localSpotlightGeneric = { ...baseRow };
+      if (instakyleRoot) localSpotlightInstakyle = { ...baseRow };
+    }
+  }
 
   if (genericRoot) {
     const imagesDir = join(genericRoot, 'images');
@@ -488,7 +585,7 @@ export async function writeTechNewsWebBundle(
 
     for (let i = 0; i < built.length; i++) {
       const b = built[i]!;
-      const input = stories[i]!;
+      const input = storiesOrdered[i]!;
       let relImage: string | null = null;
       if (b.imageFilename && b.imageBuffer?.length) {
         relImage = `images/${b.imageFilename}`;
@@ -529,6 +626,8 @@ export async function writeTechNewsWebBundle(
       episodeVerificationToken,
       ...runMeta,
       localBusiness,
+      ...(seoKeywords?.length ? { seoKeywords } : {}),
+      ...(localSpotlightGeneric ? { localSpotlight: localSpotlightGeneric } : {}),
       tickerLine,
       socialCaption,
       videoPrompt,
@@ -580,7 +679,7 @@ export async function writeTechNewsWebBundle(
     const postStories: TechNewsWebPayload['stories'] = [];
     for (let i = 0; i < built.length; i++) {
       const b = built[i]!;
-      const input = stories[i]!;
+      const input = storiesOrdered[i]!;
       let rel: string | null = null;
       if (
         instakyleShots &&
@@ -630,6 +729,8 @@ export async function writeTechNewsWebBundle(
       episodeVerificationToken,
       ...runMeta,
       localBusiness,
+      ...(seoKeywords?.length ? { seoKeywords } : {}),
+      ...(localSpotlightInstakyle ? { localSpotlight: localSpotlightInstakyle } : {}),
       tickerLine,
       socialCaption,
       videoPrompt,
