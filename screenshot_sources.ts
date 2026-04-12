@@ -5,6 +5,8 @@ export type SourceShotInput = {
   section: string;
   title: string;
   link: string;
+  /** When set, used as the JPEG filename (e.g. `99-local-spotlight.jpg` for slide order). */
+  filenameOverride?: string;
 };
 
 export type SourceShotOk = {
@@ -626,7 +628,9 @@ export async function screenshotSources(
   try {
     for (const it of filtered) {
       const slug = safeFilenamePart(`${it.section}-${it.title}`);
-      const filename = `${String(it.storyIndex).padStart(2, '0')}-${slug}.jpg`;
+      const filename =
+        it.filenameOverride?.trim() ||
+        `${String(it.storyIndex).padStart(2, '0')}-${slug}.jpg`;
       const page = await context.newPage();
       try {
         await page.goto(it.link, {

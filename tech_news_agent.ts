@@ -1157,19 +1157,40 @@ ${localColorBlock}
     envScreenshotsEnabled()
   ) {
     const { screenshotSources } = await import('./screenshot_sources');
-    const { ok: locOk, failures: locFail } = await screenshotSources([
-      {
-        storyIndex: 98,
-        section: 'LOCAL',
-        title: localBizName,
-        link: localBizWebsiteResolved,
-      },
+    const spotlightInput = {
+      storyIndex: 99,
+      section: 'LOCAL',
+      title: localBizName,
+      link: localBizWebsiteResolved,
+      filenameOverride: '99-local-spotlight.jpg',
+    };
+    let { ok: locOk, failures: locFail } = await screenshotSources([
+      spotlightInput,
     ]);
-    const hit = locOk[0];
+    let hit = locOk[0];
+    if (!hit) {
+      console.warn(
+        'Local spotlight (default viewport/UA) failed — retrying with desktop layout…',
+        locFail
+      );
+      const prevMobile = process.env.SCREENSHOT_MOBILE;
+      process.env.SCREENSHOT_MOBILE = '0';
+      try {
+        const r2 = await screenshotSources([spotlightInput]);
+        hit = r2.ok[0];
+        if (!hit) {
+          console.warn('Local spotlight (desktop retry) failed:', r2.failures);
+        }
+      } finally {
+        if (prevMobile === undefined) {
+          delete process.env.SCREENSHOT_MOBILE;
+        } else {
+          process.env.SCREENSHOT_MOBILE = prevMobile;
+        }
+      }
+    }
     if (hit) {
       localSpotlightShot = { filename: hit.filename, content: hit.content };
-    } else {
-      console.warn('Local spotlight screenshot failed:', locFail);
     }
   } else if (!localBizWebsiteResolved) {
     console.warn(
@@ -1214,6 +1235,7 @@ ${localColorBlock}
   if (localBizWebsiteResolved && /^https?:\/\//i.test(localBizWebsiteResolved)) {
     const locLines = [
       'LOCAL SPOTLIGHT (neighbor business — say the name once in the ON AIR close; JPEG attached when capture succeeds)',
+      'Slide order: use story JPEGs 01-… in headline order, then 99-local-spotlight.jpg for the neighbor close.',
       localBizName,
       localBizWebsiteResolved,
       localSpotlightShot
@@ -1223,6 +1245,7 @@ ${localColorBlock}
     localSpotlightBannerText = `\n${locLines.join('\n')}\n`;
     localSpotlightBannerHtml =
       `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Local spotlight</p>` +
+      `<p style="font-size:12px;line-height:1.45;margin:0 0 0.5em;color:#52525b">Slide order: story JPEGs <code>01-…</code> first, then <code>99-local-spotlight.jpg</code> for the neighbor close.</p>` +
       `<p style="margin:0 0 0.35em;font-size:14px;line-height:1.4">${escapeHtml(localBizName)}</p>` +
       `<p style="margin:0 0 0.75em;font-size:13px;word-break:break-all"><a href="${escapeHtml(localBizWebsiteResolved)}">${escapeHtml(localBizWebsiteResolved)}</a></p>` +
       (localSpotlightShot
