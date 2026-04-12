@@ -7,7 +7,6 @@ import {
 } from './web_publish';
 import { Resend } from 'resend';
 import {
-  LOCAL_EARLY_MORNING_SHOPS,
   LOCAL_INTERSECTION_CENTER,
   pickLocalBusiness,
   type LocalBusiness,
@@ -845,9 +844,9 @@ async function runNewsAgent() {
 
   const localColorBlock = `
 **LINDEN HILLS / NEIGHBORHOOD + LOCAL BUSINESS (before the fixed END lines — NOT optional):**
-- **Early record:** You usually tape **early in the morning** — assume **most shops are still closed.** The close is a **friendly neighbor plug** for **${localBizName}** (${localBizPitch}): walk-by / love-the-block energy, **not** “they’re open right now” unless you’re clearly joking about bankers’ hours.
-- **Optional one-breath color:** If it fits naturally, you may nod that **${LOCAL_EARLY_MORNING_SHOPS}** are among the few early risers on the corridor — **never** as a substitute for saying **${localBizName}** exactly **once** by name.
-- **1–2 short lines** of color near **${LOCAL_INTERSECTION_CENTER}** (Lake Harriet, block-quiet, etc.).
+- **Context:** You **post this show before most businesses open** — that’s just your schedule, not a story beat. Do **not** say you “walked by,” “passed,” or “stopped at” **${localBizName}** or any other shop; do **not** talk about who’s open, closed, or opening first. Keep it a **warm, friendly neighbor plug** for **${localBizName}** alone (${localBizPitch}) — love-the-block energy without implying a visit.
+- **Do not** name **any other** café, restaurant, or shop in the close — only **${localBizName}** (exactly **once** by name).
+- **1–2 short lines** of generic Linden Hills color near **${LOCAL_INTERSECTION_CENTER}** (Lake Harriet, quiet blocks, etc.) if it fits — still **without** naming other businesses.
 - **Non-negotiable:** The spoken name **${localBizName}** must appear **exactly once** in **COLUMN B (ON AIR)** in this close segment **before** “BACK TO THE SOLDERING IRON…” Avoid **shout-out** / influencer clichés, **hard sell**, or “GO CHECK THEM OUT.”
 - If you omit **${localBizName}** from ON AIR, the script is **wrong**.${localBizNote ? `\n- Extra note: ${localBizNote}` : ''}`;
 

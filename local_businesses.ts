@@ -166,6 +166,6 @@ export function pickLocalBusiness(): LocalBusiness {
 
 export const LOCAL_INTERSECTION_CENTER = '43rd St W & Upton Ave S';
 
-/** Referenced in the Gemini prompt when taping before most shops open (optional color, not the daily rotation pick). */
+/** Legacy reference for maps/docs — not injected into the daily Gemini prompt (avoid naming extra shops in the close). */
 export const LOCAL_EARLY_MORNING_SHOPS =
   "Breadsmith, Jones Coffee, and Sebastian Joe's";
