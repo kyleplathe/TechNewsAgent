@@ -325,6 +325,7 @@ const M_VIDEO = '<<<VIDEO_PROMPT>>>';
 const M_ONAIR = '<<<ON_AIR>>>';
 const M_SOURCES = '<<<SOURCES>>>';
 const M_SOCIAL = '<<<SOCIAL>>>';
+const MAX_SOURCE_STORIES = 4;
 
 function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
   const numLine = afterSources.split(/\n/)[0] ?? '';
@@ -333,9 +334,9 @@ function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
     .map((s) => parseInt(s.trim(), 10))
     .filter((n) => Number.isFinite(n) && n >= 1 && n <= maxIndex);
   const seen = new Set<number>();
-  return indices.filter((n) =>
-    seen.has(n) ? false : (seen.add(n), true)
-  );
+  return indices
+    .filter((n) => (seen.has(n) ? false : (seen.add(n), true)))
+    .slice(0, MAX_SOURCE_STORIES);
 }
 
 /**
@@ -573,15 +574,31 @@ function passesBitcoinOnlyCurrencyRule(title: string): boolean {
 }
 
 const NON_TECH_HEADLINE_SIGNAL_RE =
-  /\b(car\s+insurance|auto\s+insurance|homeowners?\s+insurance|life\s+insurance|insurance\s+rates?|mortgage|refinance|credit\s+card|debt\s+relief|personal\s+loan|real\s+estate|housing\s+market|travel\s+tips?|fashion|celebrity|horoscope)\b/i;
+  /\b(car\s+insurance|auto\s+insurance|homeowners?\s+insurance|life\s+insurance|insurance\s+rates?|state\s+farm|geico|allstate|progressive|insurance\s+claim|mortgage|refinance|credit\s+card|debt\s+relief|personal\s+loan|real\s+estate|housing\s+market|travel\s+tips?|fashion|celebrity|horoscope)\b/i;
 
 const TECH_HEADLINE_SIGNAL_RE =
   /\b(ai|a i|software|app|apps|os\b|iphone|ipad|mac|macbook|android|pixel|galaxy|windows|microsoft|apple|google|openai|anthropic|nvidia|gpu|cpu|chip|silicon|cloud|api|developer|github|cybersecurity|security|ransomware|xbox|playstation|nintendo|steam|vr\b|ar\b|robot|autonomous|self\s*driving|electric\s+vehicle|ev\b|tesla|spacex|bitcoin|lightning)\b/i;
 
+const REPAIR_HEADLINE_SIGNAL_RE =
+  /\b(repair|right\s+to\s+repair|serviceability|teardown|ifixit|parts|diagnostic|fix|maintenance|replace|battery|screen|warranty|recall)\b/i;
+
+const TECH_REPAIR_TARGET_RE =
+  /\b(phone|smartphone|iphone|android|pixel|galaxy|tablet|ipad|laptop|notebook|macbook|pc\b|computer|desktop|gpu|cpu|chip|motherboard|console|xbox|playstation|nintendo|switch|controller|headset|vr\b|ar\b|wearable|watch|apple\s+watch|airpods|earbuds|router|modem|drone|printer|camera|firmware|software|electronics?)\b/i;
+
 function passesEditorialScopeRule(item: Collected): boolean {
-  if (item.section !== 'TECH' && item.section !== 'HARDWARE') return true;
-  if (!NON_TECH_HEADLINE_SIGNAL_RE.test(item.title)) return true;
-  return TECH_HEADLINE_SIGNAL_RE.test(item.title);
+  if (item.section === 'TECH' || item.section === 'HARDWARE') {
+    if (!NON_TECH_HEADLINE_SIGNAL_RE.test(item.title)) return true;
+    return TECH_HEADLINE_SIGNAL_RE.test(item.title);
+  }
+  if (item.section === 'REPAIR') {
+    // Keep REPAIR strictly in tech/electronics lanes.
+    return (
+      REPAIR_HEADLINE_SIGNAL_RE.test(item.title) &&
+      TECH_REPAIR_TARGET_RE.test(item.title) &&
+      !NON_TECH_HEADLINE_SIGNAL_RE.test(item.title)
+    );
+  }
+  return true;
 }
 
 async function readAirLog(path: string): Promise<AirLogEntry[]> {
