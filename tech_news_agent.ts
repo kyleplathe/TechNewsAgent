@@ -21,6 +21,14 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function normalizeWebsiteUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  // Treat bare domains as HTTPS so local spotlight always has a usable URL.
+  return `https://${trimmed.replace(/^\/+/, '')}`;
+}
+
 /**
  * One line for your video ticker (paste into FCP / title).
  * Price: CoinGecko. Block height: blockchain.info.
@@ -564,6 +572,18 @@ function passesBitcoinOnlyCurrencyRule(title: string): boolean {
   return true;
 }
 
+const NON_TECH_HEADLINE_SIGNAL_RE =
+  /\b(car\s+insurance|auto\s+insurance|homeowners?\s+insurance|life\s+insurance|insurance\s+rates?|mortgage|refinance|credit\s+card|debt\s+relief|personal\s+loan|real\s+estate|housing\s+market|travel\s+tips?|fashion|celebrity|horoscope)\b/i;
+
+const TECH_HEADLINE_SIGNAL_RE =
+  /\b(ai|a i|software|app|apps|os\b|iphone|ipad|mac|macbook|android|pixel|galaxy|windows|microsoft|apple|google|openai|anthropic|nvidia|gpu|cpu|chip|silicon|cloud|api|developer|github|cybersecurity|security|ransomware|xbox|playstation|nintendo|steam|vr\b|ar\b|robot|autonomous|self\s*driving|electric\s+vehicle|ev\b|tesla|spacex|bitcoin|lightning)\b/i;
+
+function passesEditorialScopeRule(item: Collected): boolean {
+  if (item.section !== 'TECH' && item.section !== 'HARDWARE') return true;
+  if (!NON_TECH_HEADLINE_SIGNAL_RE.test(item.title)) return true;
+  return TECH_HEADLINE_SIGNAL_RE.test(item.title);
+}
+
 async function readAirLog(path: string): Promise<AirLogEntry[]> {
   try {
     const raw = await readFile(path, 'utf8');
@@ -779,10 +799,22 @@ async function runNewsAgent() {
   });
 
   collected = collected.filter((c) => passesBitcoinOnlyCurrencyRule(c.title));
+  const droppedOffScope: string[] = [];
+  collected = collected.filter((c) => {
+    const ok = passesEditorialScopeRule(c);
+    if (!ok) droppedOffScope.push(`[${c.section}] ${c.title}`);
+    return ok;
+  });
+  if (droppedOffScope.length) {
+    console.warn(
+      'Dropped off-scope headlines (non-tech within TECH/HARDWARE feeds):\n' +
+        droppedOffScope.join('\n')
+    );
+  }
 
   if (!collected.length) {
     throw new Error(
-      'All candidate stories were filtered out by freshness, Bitcoin-only currency rule, undated items (set ALLOW_UNDATED_FEED_ITEMS=1 only if a feed omits dates), or repeat rules. Try MAX_STORY_AGE_HOURS_* , BITCOIN_ONLY_CURRENCY_RULE=0, or STORY_REPEAT_COOLDOWN_DAYS.'
+      'All candidate stories were filtered out by freshness, editorial scope, Bitcoin-only currency rule, undated items (set ALLOW_UNDATED_FEED_ITEMS=1 only if a feed omits dates), or repeat rules. Try MAX_STORY_AGE_HOURS_* , BITCOIN_ONLY_CURRENCY_RULE=0, or STORY_REPEAT_COOLDOWN_DAYS.'
     );
   }
 
@@ -1042,20 +1074,33 @@ ${localColorBlock}
     console.log('Sources used for segment (screenshots):', orderedIndices.join(', '));
   }
 
-  /** Plain text: [SECTION] Title then URL on next line (matches FCP / screenshot workflow). */
-  const linksText = used
-    .map((c) => `[${c.section}] ${c.title}\n${c.link}`)
-    .join('\n\n');
+  const localBizWebsiteResolved = normalizeWebsiteUrl(
+    process.env.LOCAL_BIZ_WEBSITE?.trim() || pickedBiz.website?.trim() || ''
+  );
+  const hasLocalSpotlightLink =
+    !!localBizWebsiteResolved && /^https?:\/\//i.test(localBizWebsiteResolved);
 
+  /** Plain text: [SECTION] Title then URL on next line (matches FCP / screenshot workflow). */
+  const linkRowsText = used.map((c) => `[${c.section}] ${c.title}\n${c.link}`);
+  if (hasLocalSpotlightLink) {
+    linkRowsText.push(`[Local Spotlight] ${localBizName}\n${localBizWebsiteResolved}`);
+  }
+  const linksText = linkRowsText.join('\n\n');
+
+  const linksHtmlRows = used.map(
+    (c) =>
+      `<p style="margin:0 0 0.15em;font-size:14px;line-height:1.4">[${escapeHtml(c.section)}] ${escapeHtml(c.title)}</p>` +
+      `<p style="margin:0 0 1.1em;font-size:13px;word-break:break-all"><a href="${escapeHtml(c.link)}">${escapeHtml(c.link)}</a></p>`
+  );
+  if (hasLocalSpotlightLink) {
+    linksHtmlRows.push(
+      `<p style="margin:0 0 0.15em;font-size:14px;line-height:1.4">[Local Spotlight] ${escapeHtml(localBizName)}</p>` +
+        `<p style="margin:0 0 1.1em;font-size:13px;word-break:break-all"><a href="${escapeHtml(localBizWebsiteResolved)}">${escapeHtml(localBizWebsiteResolved)}</a></p>`
+    );
+  }
   const linksHtml =
-    used.length > 0
-      ? used
-          .map(
-            (c) =>
-              `<p style="margin:0 0 0.15em;font-size:14px;line-height:1.4">[${escapeHtml(c.section)}] ${escapeHtml(c.title)}</p>` +
-              `<p style="margin:0 0 1.1em;font-size:13px;word-break:break-all"><a href="${escapeHtml(c.link)}">${escapeHtml(c.link)}</a></p>`
-          )
-          .join('')
+    linksHtmlRows.length > 0
+      ? linksHtmlRows.join('')
       : `<p style="color:#888;font-size:13px">No parsed source list — model did not return <<<SOURCES>>> lines, or no URLs in those items.</p>`;
 
   const screenshotItems = orderedIndices
@@ -1147,9 +1192,6 @@ ${localColorBlock}
     console.log('SCREENSHOT_SOURCES disabled — skipping Playwright.');
   }
 
-  const localBizWebsiteResolved =
-    process.env.LOCAL_BIZ_WEBSITE?.trim() || pickedBiz.website?.trim() || '';
-
   let localSpotlightShot: { filename: string; content: Buffer } | null = null;
   if (
     localBizWebsiteResolved &&
@@ -1230,29 +1272,6 @@ ${localColorBlock}
     }
   }
 
-  let localSpotlightBannerText = '';
-  let localSpotlightBannerHtml = '';
-  if (localBizWebsiteResolved && /^https?:\/\//i.test(localBizWebsiteResolved)) {
-    const locLines = [
-      'LOCAL SPOTLIGHT (neighbor business — say the name once in the ON AIR close; JPEG attached when capture succeeds)',
-      'Slide order: use story JPEGs 01-… in headline order, then 99-local-spotlight.jpg for the neighbor close.',
-      localBizName,
-      localBizWebsiteResolved,
-      localSpotlightShot
-        ? `Screenshot: ${localSpotlightShot.filename}`
-        : '(No storefront JPEG this run — see log / SCREENSHOT_SOURCES / size limit)',
-    ];
-    localSpotlightBannerText = `\n${locLines.join('\n')}\n`;
-    localSpotlightBannerHtml =
-      `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Local spotlight</p>` +
-      `<p style="font-size:12px;line-height:1.45;margin:0 0 0.5em;color:#52525b">Slide order: story JPEGs <code>01-…</code> first, then <code>99-local-spotlight.jpg</code> for the neighbor close.</p>` +
-      `<p style="margin:0 0 0.35em;font-size:14px;line-height:1.4">${escapeHtml(localBizName)}</p>` +
-      `<p style="margin:0 0 0.75em;font-size:13px;word-break:break-all"><a href="${escapeHtml(localBizWebsiteResolved)}">${escapeHtml(localBizWebsiteResolved)}</a></p>` +
-      (localSpotlightShot
-        ? `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(`JPEG: ${localSpotlightShot.filename}`)}</p>`
-        : `<p style="font-size:12px;color:#a16207;margin:0 0 1em">No storefront JPEG this run.</p>`);
-  }
-
   const resendKey = process.env.RESEND_API_KEY;
   const toRaw = process.env.RESEND_TO?.trim();
   const configuredFrom = process.env.RESEND_FROM?.trim() || '';
@@ -1315,7 +1334,6 @@ ${localColorBlock}
     linksHeader,
     '',
     linksText || '(none)',
-    localSpotlightBannerText.trimEnd(),
     screenshotBannerText.trimEnd(),
   ]
     .filter((block) => block.length > 0)
@@ -1332,7 +1350,6 @@ ${localColorBlock}
     `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.25em;padding:12px;background:#fefce8;border-radius:8px;border:1px solid #eab308;user-select:all;-webkit-user-select:all">${escapeHtml(ytVerifyLine)}</pre>` +
     `<p style="font-size:12px;font-weight:700;color:#444;margin:0 0 0.5em">${escapeHtml(linksHeader)}</p>` +
     `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.45">${linksHtml}</div>` +
-    localSpotlightBannerHtml +
     screenshotBannerHtml +
     `</div>`;
 

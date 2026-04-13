@@ -4,6 +4,21 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replace(/&#(\d+);/g, (_, dec: string) =>
+      String.fromCodePoint(Number.parseInt(dec, 10))
+    )
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16))
+    )
+    .replace(/&(apos|#39|rsquo);/gi, "'")
+    .replace(/&(quot|#34);/gi, '"')
+    .replace(/&(amp|#38);/gi, '&')
+    .replace(/&(lt|#60);/gi, '<')
+    .replace(/&(gt|#62);/gi, '>');
+}
+
 export type WebPublishStoryInput = {
   storyIndex: number;
   section: string;
@@ -509,9 +524,9 @@ export async function writeTechNewsWebBundle(
     built.push({
       storyIndex: s.storyIndex,
       section: s.section,
-      title: s.title,
+      title: decodeHtmlEntities(s.title),
       link: s.link,
-      studioHeadline: sec?.headline?.trim() || s.title,
+      studioHeadline: decodeHtmlEntities(sec?.headline?.trim() || s.title),
       studioNotes: sec?.body?.trim() || '',
       imageFilename: s.imageFilename,
       imageBuffer: s.imageBuffer,
