@@ -630,6 +630,18 @@ export async function writeTechNewsWebBundle(
       }
       payloadStories.push(row);
     }
+    if (localSpotlightGeneric) {
+      payloadStories.push({
+        storyIndex: 99,
+        section: 'Local Spotlight',
+        title: localSpotlightGeneric.businessName,
+        link: localSpotlightGeneric.websiteUrl,
+        studioHeadline: localSpotlightGeneric.businessName,
+        studioNotes: 'Neighborhood local business spotlight.',
+        image: localSpotlightGeneric.image,
+        imageUrl: localSpotlightGeneric.imageUrl,
+      });
+    }
 
     const runMeta = workflowRunMeta();
     const payload: TechNewsWebPayload = {
@@ -727,6 +739,18 @@ export async function writeTechNewsWebBundle(
         row.videoStartSec = videoStartSec;
       }
       postStories.push(row);
+    }
+    if (localSpotlightInstakyle) {
+      postStories.push({
+        storyIndex: 99,
+        section: 'Local Spotlight',
+        title: localSpotlightInstakyle.businessName,
+        link: localSpotlightInstakyle.websiteUrl,
+        studioHeadline: localSpotlightInstakyle.businessName,
+        studioNotes: 'Neighborhood local business spotlight.',
+        image: localSpotlightInstakyle.image,
+        imageUrl: localSpotlightInstakyle.imageUrl,
+      });
     }
     const mergedPostVideo =
       (videoUrl && videoUrl.trim()) || prevPost?.videoUrl || null;
