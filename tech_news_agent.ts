@@ -488,10 +488,22 @@ function countApproxNewsBeats(onAir: string): number {
     .replace(/BACK TO THE SOLDERING IRON\.[\s\S]*$/i, '')
     .trim();
   if (!body) return 0;
-  // Paragraph-ish grouping tracks script beats better than line count.
-  return body
+  const paragraphBlocks = body
     .split(/\n{2,}/)
     .map((b) => b.trim())
+    .filter(Boolean).length;
+  if (paragraphBlocks >= 3) return paragraphBlocks;
+  // Fallback when model returns one dense block: estimate beats from sentence density.
+  const sentenceCount = (body.match(/[.!?](?=\s|$)/g) ?? []).length;
+  if (sentenceCount <= 0) return paragraphBlocks;
+  return Math.max(paragraphBlocks, Math.ceil(sentenceCount / 2));
+}
+
+function countOnAirWords(onAir: string): number {
+  return onAir
+    .replace(/\r\n/g, '\n')
+    .trim()
+    .split(/\s+/)
     .filter(Boolean).length;
 }
 
@@ -527,8 +539,15 @@ function validateStudioOutput(
     issues.push(`ON AIR must mention "${localBizName}" exactly once; got ${bizMentions}.`);
   }
   const beatCount = countApproxNewsBeats(onAir);
-  if (beatCount > 5) {
-    issues.push(`ON AIR appears to contain too many beats (${beatCount} blocks).`);
+  const maxAllowedBeats = TARGET_SOURCE_STORIES + 1; // 4 sources + neighborhood close
+  if (beatCount > maxAllowedBeats) {
+    issues.push(
+      `ON AIR appears to contain too many beats (${beatCount}); keep to ${TARGET_SOURCE_STORIES} story beats plus close.`
+    );
+  }
+  const words = countOnAirWords(onAir);
+  if (words > 235) {
+    issues.push(`ON AIR is too long (${words} words); trim to ~175-215 words.`);
   }
   return issues;
 }
@@ -996,6 +1015,7 @@ ${storyPickRule}
 - **Wolves / LOCAL** — **Canis Hoopus (RSS)** plus **NBA.com Timberwolves** index (same **[LOCAL]** list). Use the basketball beat **only** when the item is **fresh**; if nothing qualifies, **skip Wolves** entirely.
 - Skateboarding: use **[SKATE]** for one quick, legit beat (premiere, contest, real news). Skip if nothing’s good.
 - **Length (non-negotiable):** One vertical take **~90 seconds** — treat **~85s as a soft floor** and **~95s as a hard ceiling** at a calm read. **Budget ~175–215 spoken words** between the fixed START line and the fixed END lines (ALL CAPS reads a little slow — stay lean). **If you are over budget, cut beats** before you cut the **${localBizName}** close.
+- **No extra headlines:** In **ON AIR**, cover **only** the stories whose numbers you list in **<<<SOURCES>>>**. No bonus or side mentions outside those ${TARGET_SOURCE_STORIES} picks.
 - **Tight but not thin:** On **main** beats only, add **one concrete detail** when the headline gives you something real (a number, vendor, mechanism) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
 - **Banned hype / podcast clichés (ON AIR and social — never say or echo):** “hold on to your hat(s),” “buckle up,” “deep dive,” “let’s dive in,” “fire hose,” “grab your popcorn,” “you won’t believe,” “crazy,” “insane” (unless the headline literally uses it), or **any** “fasten your seatbelts” style padding. Sound like a colleague at the bench, not a trailer voice.
 - **Local business (every episode):** The ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block). That line is **not** filler — **include it** even on tight ~90s reads.
