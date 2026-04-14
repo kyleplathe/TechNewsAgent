@@ -519,6 +519,9 @@ function validateStudioOutput(
   if (/\blake street\b/i.test(onAir)) {
     issues.push('ON AIR must not mention Lake Street.');
   }
+  if (/\blynx\b/i.test(onAir)) {
+    issues.push('ON AIR must not mention Lynx.');
+  }
   const bizMentions = countBusinessMentions(onAir, localBizName);
   if (bizMentions !== 1) {
     issues.push(`ON AIR must mention "${localBizName}" exactly once; got ${bizMentions}.`);
@@ -658,6 +661,10 @@ function passesEditorialScopeRule(item: Collected): boolean {
       TECH_REPAIR_TARGET_RE.test(item.title) &&
       !NON_TECH_HEADLINE_SIGNAL_RE.test(item.title)
     );
+  }
+  if (item.section === 'LOCAL') {
+    // LOCAL is Timberwolves-only; drop Lynx items from mixed feeds.
+    return !/\blynx\b/i.test(item.title);
   }
   return true;
 }
