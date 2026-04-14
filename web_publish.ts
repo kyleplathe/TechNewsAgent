@@ -24,7 +24,7 @@ export type WebPublishStoryInput = {
   section: string;
   title: string;
   link: string;
-  /** RSS / Atom `pubDate` — used when `TECHNEWS_BLOG_STORY_ORDER=newest` (default). */
+  /** RSS / Atom `pubDate` — used when `TECHNEWS_BLOG_STORY_ORDER=newest` (opt-in). */
   publishedAt?: string;
   /** JPEG filename (e.g. 01-slug.jpg) when a screenshot exists for this story */
   imageFilename?: string;
@@ -217,11 +217,11 @@ function joinUrl(base: string, rel: string): string {
   return `${b}/${r}`;
 }
 
-/** Default **newest-first** by `publishedAt`; set `TECHNEWS_BLOG_STORY_ORDER=script` for `<<<SOURCES>>>` order. */
+/** Default **script** order (`<<<SOURCES>>>`); set `TECHNEWS_BLOG_STORY_ORDER=newest` for date order. */
 function blogStoryOrderMode(): 'newest' | 'script' {
   const v = process.env.TECHNEWS_BLOG_STORY_ORDER?.trim().toLowerCase();
-  if (v === 'script' || v === 'sources' || v === 'on_air') return 'script';
-  return 'newest';
+  if (v === 'newest' || v === 'date' || v === 'published') return 'newest';
+  return 'script';
 }
 
 function sortStoriesForBlogOrder(

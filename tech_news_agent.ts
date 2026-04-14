@@ -461,7 +461,7 @@ function ensureLocalBusinessInOnAir(onAir: string, bizName: string): string {
   const name = bizName.trim();
   if (!name) return t;
   if (spokenNameAppearsInOnAir(t, name)) return t;
-  const insert = `LINDEN HILLS MOVES WITH ITS OWN MORNING RHYTHM, AND ${name.toUpperCase()} IS PART OF WHAT MAKES THIS CORNER FEEL LIKE HOME.`;
+  const insert = `LINDEN HILLS IS QUIET THIS EARLY, AND ${name.toUpperCase()} IS PART OF THE NORMAL MORNING RHYTHM ON THIS CORNER.`;
   const re = /^([\s\S]*?)(BACK TO THE SOLDERING IRON\b[\s\S]*)$/im;
   const m = t.match(re);
   if (m && m[1] !== undefined && m[2] !== undefined) {
@@ -978,14 +978,22 @@ async function runNewsAgent() {
   const localBizPitch =
     process.env.LOCAL_BIZ_PITCH?.trim() ||
     `${pickedBiz.description} (${pickedBiz.category}).`;
+  const localBizCategory = pickedBiz.category.trim();
+  const localBizTags = pickedBiz.tags.join(', ');
+  const coffeeAllowed =
+    /\b(cafe|coffee|tea)\b/i.test(localBizCategory) ||
+    pickedBiz.tags.some((t) => /\b(cafe|coffee|tea)\b/i.test(t));
   const localBizNote = process.env.LOCAL_BIZ_NOTE?.trim() || '';
 
   const localColorBlock = `
 **LINDEN HILLS / NEIGHBORHOOD + LOCAL BUSINESS (before the fixed END lines — NOT optional):**
 - **Context:** You **post this show before most businesses open** — that’s just your schedule, not a story beat. Do **not** say you “walked by,” “passed,” or “stopped at” **${localBizName}** or any other shop; do **not** talk about who’s open, closed, or opening first. Keep it a **neighbor-context line** for **${localBizName}** alone (${localBizPitch}) — identity and place, not promotion.
 - **Do not** name **any other** café, restaurant, or shop in the close — only **${localBizName}** (exactly **once** by name).
+- **Business-type anchor:** Keep the mention tied to what this place actually is (**category:** ${localBizCategory}; **tags:** ${localBizTags}).
+- **No default coffee line:** ${coffeeAllowed ? `Coffee/tea wording is allowed here because this business fits that lane, but still keep it brief and non-promotional.` : `Do **not** mention coffee, espresso, or “grabbing a cup” for this business.`}
 - **1–2 short lines** of generic Linden Hills color near **${LOCAL_INTERSECTION_CENTER}** (Lake Harriet, quiet blocks, etc.) if it fits — still **without** naming other businesses.
-- **Style target:** One calm sentence that sounds like local scene-setting, not an ad.
+- **Style target:** One calm, observational sentence that sounds like local scene-setting, not an ad.
+- **Good pattern:** Neighborhood atmosphere + where the business fits in daily rhythm. **Bad pattern:** praise stack, promo language, or recommendation voice.
 - **Non-negotiable:** The spoken name **${localBizName}** must appear **exactly once** in **COLUMN B (ON AIR)** in this close segment **before** “BACK TO THE SOLDERING IRON…” Avoid **shout-out** / influencer clichés, **hard sell**, “GO CHECK THEM OUT,” or direct calls to action.
 - If you omit **${localBizName}** from ON AIR, the script is **wrong**.${localBizNote ? `\n- Extra note: ${localBizNote}` : ''}`;
 
