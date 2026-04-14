@@ -1082,11 +1082,25 @@ ${localColorBlock}
     10,
     Math.max(1, parseInt(process.env.GEMINI_MAX_RETRIES ?? '6', 10) || 6)
   );
+  const maxGeminiTotalAttempts = Math.min(
+    24,
+    Math.max(
+      2,
+      parseInt(process.env.GEMINI_MAX_TOTAL_ATTEMPTS ?? '8', 10) || 8
+    )
+  );
+  let geminiTotalAttempts = 0;
 
   async function generateWithBackoff(requestText: string): Promise<string> {
     let raw = '';
     let lastErr = '';
     for (let attempt = 1; attempt <= maxGeminiAttempts; attempt++) {
+      geminiTotalAttempts += 1;
+      if (geminiTotalAttempts > maxGeminiTotalAttempts) {
+        throw new Error(
+          `Gemini: exceeded total attempt budget (${maxGeminiTotalAttempts}) across retries/validation loops.`
+        );
+      }
       const aiResponse = await fetch(genUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
