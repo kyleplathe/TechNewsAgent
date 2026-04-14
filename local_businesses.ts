@@ -184,12 +184,25 @@ const BUSINESSES_43RD_UPTON: LocalBusiness[] = [
 
 /** Stable daily rotation so the plug doesn’t repeat too often. */
 export function pickLocalBusiness(): LocalBusiness {
-  const today = new Date();
-  const y = today.getUTCFullYear();
+  const now = new Date();
+  const chicagoParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  })
+    .formatToParts(now)
+    .reduce<Record<string, number>>((acc, part) => {
+      if (part.type === 'year' || part.type === 'month' || part.type === 'day') {
+        acc[part.type] = parseInt(part.value, 10);
+      }
+      return acc;
+    }, {});
+  const y = chicagoParts.year ?? now.getUTCFullYear();
+  const m = (chicagoParts.month ?? 1) - 1;
+  const d = chicagoParts.day ?? 1;
   const start = Date.UTC(y, 0, 1);
-  const dayOfYear = Math.floor(
-    (Date.UTC(y, today.getUTCMonth(), today.getUTCDate()) - start) / 86_400_000
-  );
+  const dayOfYear = Math.floor((Date.UTC(y, m, d) - start) / 86_400_000);
   const idx =
     ((dayOfYear % BUSINESSES_43RD_UPTON.length) + BUSINESSES_43RD_UPTON.length) %
     BUSINESSES_43RD_UPTON.length;

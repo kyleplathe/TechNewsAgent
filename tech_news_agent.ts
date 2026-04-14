@@ -326,6 +326,7 @@ const M_ONAIR = '<<<ON_AIR>>>';
 const M_SOURCES = '<<<SOURCES>>>';
 const M_SOCIAL = '<<<SOCIAL>>>';
 const MAX_SOURCE_STORIES = 4;
+const TARGET_SOURCE_STORIES = 4;
 
 function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
   const numLine = afterSources.split(/\n/)[0] ?? '';
@@ -467,6 +468,61 @@ function ensureLocalBusinessInOnAir(onAir: string, bizName: string): string {
     return `${m[1].trim()}\n\n${insert}\n\n${m[2].trim()}`;
   }
   return `${t}\n\n${insert}\n\nBACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.`;
+}
+
+function countBusinessMentions(onAir: string, bizName: string): number {
+  const hay = normalizeText(onAir);
+  const needle = normalizeText(bizName);
+  if (!needle) return 0;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  const m = hay.match(new RegExp(`\\b${escaped}\\b`, 'gi'));
+  return m?.length ?? 0;
+}
+
+function countApproxNewsBeats(onAir: string): number {
+  const body = onAir
+    .replace(
+      /^LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE\. AND WE'VE GOT A LOT HITTING THE SHOP TODAY\./i,
+      ''
+    )
+    .replace(/BACK TO THE SOLDERING IRON\.[\s\S]*$/i, '')
+    .trim();
+  if (!body) return 0;
+  // Paragraph-ish grouping tracks script beats better than line count.
+  return body
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean).length;
+}
+
+function validateStudioOutput(
+  onAir: string,
+  indices: number[],
+  localBizName: string
+): string[] {
+  const issues: string[] = [];
+  const lower = onAir.toLowerCase();
+  const sourceCount = indices.length;
+  if (sourceCount !== TARGET_SOURCE_STORIES) {
+    issues.push(
+      `SOURCES must include exactly ${TARGET_SOURCE_STORIES} story numbers; got ${sourceCount}.`
+    );
+  }
+  if (/\blinx\b/i.test(lower)) {
+    issues.push('ON AIR includes "Linx" typo.');
+  }
+  if (/\blake street\b/i.test(lower)) {
+    issues.push('ON AIR mentions Lake Street instead of neighborhood close cues.');
+  }
+  const bizMentions = countBusinessMentions(onAir, localBizName);
+  if (bizMentions !== 1) {
+    issues.push(`ON AIR must mention "${localBizName}" exactly once; got ${bizMentions}.`);
+  }
+  const beatCount = countApproxNewsBeats(onAir);
+  if (beatCount > 5) {
+    issues.push(`ON AIR appears to contain too many beats (${beatCount} blocks).`);
+  }
+  return issues;
 }
 
 function titleFingerprint(title: string): string {
@@ -875,7 +931,7 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const storyPickRule = `- **<<<SOURCES>>> length = slide count:** Pick **3–4 story numbers** total, **hard cap 4** (**never 5+**). Aim **3** for a clean desk. A tight show beats a laundry list.
+  const storyPickRule = `- **<<<SOURCES>>> length = slide count:** Pick **exactly ${TARGET_SOURCE_STORIES} story numbers** total (**never 5+**).
 - **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first** (publish time). When several headlines are similarly strong, prefer the **newer** item.
 - **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~90s**.
 - **Culture / sports slot:** **Prefer at most one** of **[SKATE]** or **Wolves** (**[LOCAL]**). If you use **both**, each must be **one sentence** and you must still hit the **~90s** / **word budget** (almost always pick **one**).
@@ -952,7 +1008,7 @@ ${localColorBlock}
 (ALL CAPS — one take, **~90s** with **~175–215 words** between START and END; same order as SOURCES; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
 
 <<<SOURCES>>>
-(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **3 typical, 4 maximum**, never more. E.g. \`2,5,7\` = story **2**, then **5**, then **7**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
+(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`2,5,7,9\` = story **2**, then **5**, then **7**, then **9**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
 
 <<<SOCIAL>>>
 (**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**, 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler. **Write in sentence case** (normal Facebook / Instagram style): capitalize the first word and proper nouns only. **Do not** use ALL CAPS, title case for the whole paragraph, or fake emphasis — platforms flag shouty text as low quality. Standard tech spellings are fine (OpenAI, iPhone, GPU). No “link in bio,” no explaining screenshots. Threads-length.)
@@ -966,10 +1022,11 @@ ${localColorBlock}
   const model = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite';
   const genUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
 
-  const body = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 4096 },
-  });
+  const buildGeminiBody = (text: string) =>
+    JSON.stringify({
+      contents: [{ parts: [{ text }] }],
+      generationConfig: { maxOutputTokens: 4096 },
+    });
 
   type GeminiResponse = {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
@@ -991,58 +1048,87 @@ ${localColorBlock}
     Math.max(1, parseInt(process.env.GEMINI_MAX_RETRIES ?? '6', 10) || 6)
   );
 
-  let rawOut = '';
-  let lastErr = '';
-
-  for (let attempt = 1; attempt <= maxGeminiAttempts; attempt++) {
-    const aiResponse = await fetch(genUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body,
-      signal: AbortSignal.timeout(geminiTimeoutMs),
-    });
-
-    const data = (await aiResponse.json()) as GeminiResponse;
-
-    if (aiResponse.status === 429 && attempt < maxGeminiAttempts) {
-      const msg = data.error?.message ?? '';
-      lastErr = msg;
-      const waitSec =
-        parseGeminiRetrySeconds(msg) ?? Math.min(15 * attempt, 90);
-      console.warn(
-        `Gemini 429 (rate limit / quota window). Waiting ${Math.ceil(waitSec)}s — retry ${attempt + 1}/${maxGeminiAttempts}…`
-      );
-      await new Promise((r) =>
-        setTimeout(r, Math.ceil(waitSec * 1000))
-      );
-      continue;
+  async function generateWithBackoff(requestText: string): Promise<string> {
+    let raw = '';
+    let lastErr = '';
+    for (let attempt = 1; attempt <= maxGeminiAttempts; attempt++) {
+      const aiResponse = await fetch(genUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: buildGeminiBody(requestText),
+        signal: AbortSignal.timeout(geminiTimeoutMs),
+      });
+      const data = (await aiResponse.json()) as GeminiResponse;
+      if (aiResponse.status === 429 && attempt < maxGeminiAttempts) {
+        const msg = data.error?.message ?? '';
+        lastErr = msg;
+        const waitSec =
+          parseGeminiRetrySeconds(msg) ?? Math.min(15 * attempt, 90);
+        console.warn(
+          `Gemini 429 (rate limit / quota window). Waiting ${Math.ceil(waitSec)}s — retry ${attempt + 1}/${maxGeminiAttempts}…`
+        );
+        await new Promise((r) => setTimeout(r, Math.ceil(waitSec * 1000)));
+        continue;
+      }
+      if (!aiResponse.ok) {
+        throw new Error(
+          `Gemini API ${aiResponse.status}: ${data.error?.message ?? JSON.stringify(data)}`
+        );
+      }
+      const parts = data.candidates?.[0]?.content?.parts;
+      raw = parts?.map((p) => p.text).filter(Boolean).join('') ?? '';
+      if (!raw) {
+        throw new Error(`Gemini returned no text: ${JSON.stringify(data)}`);
+      }
+      break;
     }
-
-    if (!aiResponse.ok) {
+    if (!raw) {
       throw new Error(
-        `Gemini API ${aiResponse.status}: ${data.error?.message ?? JSON.stringify(data)}`
+        `Gemini: exhausted ${maxGeminiAttempts} attempts (429). Last error: ${lastErr || 'unknown'}`
       );
     }
-
-    const parts = data.candidates?.[0]?.content?.parts;
-    rawOut = parts?.map((p) => p.text).filter(Boolean).join('') ?? '';
-    if (!rawOut) {
-      throw new Error(`Gemini returned no text: ${JSON.stringify(data)}`);
-    }
-    break;
+    return raw;
   }
 
-  if (!rawOut) {
-    throw new Error(
-      `Gemini: exhausted ${maxGeminiAttempts} attempts (429). Last error: ${lastErr || 'unknown'}`
+  const maxValidationRetries = Math.min(
+    3,
+    Math.max(1, parseInt(process.env.GEMINI_VALIDATION_RETRIES ?? '2', 10) || 2)
+  );
+  let rawOut = '';
+  let fixedOnAir = '';
+  let onAirForEmail = '';
+  let indices: number[] = [];
+  let modelSocial = '';
+  let validationIssues: string[] = [];
+
+  for (let pass = 1; pass <= maxValidationRetries + 1; pass++) {
+    const requestText =
+      pass === 1
+        ? prompt
+        : `${prompt}\n\nRETRY NOTE: Your last output violated hard rules.\n${validationIssues
+            .map((i) => `- ${i}`)
+            .join('\n')}\nRegenerate all three blocks now, following the exact markers.`;
+    rawOut = await generateWithBackoff(requestText);
+    const parsed = parseStudioOutput(rawOut, collected.length);
+    fixedOnAir = parsed.onAir.trim();
+    indices = parsed.indices;
+    modelSocial = parsed.social;
+    onAirForEmail = ensureLocalBusinessInOnAir(fixedOnAir, localBizName);
+    validationIssues = validateStudioOutput(onAirForEmail, indices, localBizName);
+    if (!validationIssues.length) break;
+    if (pass <= maxValidationRetries) {
+      console.warn(
+        `Gemini output failed validation (pass ${pass}/${maxValidationRetries + 1}); retrying:\n${validationIssues.join('\n')}`
+      );
+    }
+  }
+
+  if (validationIssues.length) {
+    console.warn(
+      'Proceeding after validation retries exhausted; preserving best effort output:\n' +
+        validationIssues.join('\n')
     );
   }
-
-  const { onAir: finalScript, indices, social: modelSocial } =
-    parseStudioOutput(rawOut, collected.length);
-
-  const fixedOnAir = finalScript.trim();
-  const onAirForEmail = ensureLocalBusinessInOnAir(fixedOnAir, localBizName);
   if (onAirForEmail.trim() !== fixedOnAir.trim()) {
     console.warn(
       'ON AIR: Injected a neighbor line with the local business name (model output did not include it).'
