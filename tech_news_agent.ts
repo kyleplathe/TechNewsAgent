@@ -461,7 +461,7 @@ function ensureLocalBusinessInOnAir(onAir: string, bizName: string): string {
   const name = bizName.trim();
   if (!name) return t;
   if (spokenNameAppearsInOnAir(t, name)) return t;
-  const insert = `${name.toUpperCase()} — QUICK NEIGHBOR NOD BY ${LOCAL_INTERSECTION_CENTER}.`;
+  const insert = `LINDEN HILLS MOVES WITH ITS OWN MORNING RHYTHM, AND ${name.toUpperCase()} IS PART OF WHAT MAKES THIS CORNER FEEL LIKE HOME.`;
   const re = /^([\s\S]*?)(BACK TO THE SOLDERING IRON\b[\s\S]*)$/im;
   const m = t.match(re);
   if (m && m[1] !== undefined && m[2] !== undefined) {
@@ -982,10 +982,11 @@ async function runNewsAgent() {
 
   const localColorBlock = `
 **LINDEN HILLS / NEIGHBORHOOD + LOCAL BUSINESS (before the fixed END lines — NOT optional):**
-- **Context:** You **post this show before most businesses open** — that’s just your schedule, not a story beat. Do **not** say you “walked by,” “passed,” or “stopped at” **${localBizName}** or any other shop; do **not** talk about who’s open, closed, or opening first. Keep it a **warm, friendly neighbor plug** for **${localBizName}** alone (${localBizPitch}) — love-the-block energy without implying a visit.
+- **Context:** You **post this show before most businesses open** — that’s just your schedule, not a story beat. Do **not** say you “walked by,” “passed,” or “stopped at” **${localBizName}** or any other shop; do **not** talk about who’s open, closed, or opening first. Keep it a **neighbor-context line** for **${localBizName}** alone (${localBizPitch}) — identity and place, not promotion.
 - **Do not** name **any other** café, restaurant, or shop in the close — only **${localBizName}** (exactly **once** by name).
 - **1–2 short lines** of generic Linden Hills color near **${LOCAL_INTERSECTION_CENTER}** (Lake Harriet, quiet blocks, etc.) if it fits — still **without** naming other businesses.
-- **Non-negotiable:** The spoken name **${localBizName}** must appear **exactly once** in **COLUMN B (ON AIR)** in this close segment **before** “BACK TO THE SOLDERING IRON…” Avoid **shout-out** / influencer clichés, **hard sell**, or “GO CHECK THEM OUT.”
+- **Style target:** One calm sentence that sounds like local scene-setting, not an ad.
+- **Non-negotiable:** The spoken name **${localBizName}** must appear **exactly once** in **COLUMN B (ON AIR)** in this close segment **before** “BACK TO THE SOLDERING IRON…” Avoid **shout-out** / influencer clichés, **hard sell**, “GO CHECK THEM OUT,” or direct calls to action.
 - If you omit **${localBizName}** from ON AIR, the script is **wrong**.${localBizNote ? `\n- Extra note: ${localBizNote}` : ''}`;
 
   const segmentOrderBlock = hasWolves
@@ -1031,7 +1032,7 @@ ${localColorBlock}
 - **Do not** put [B-ROLL] or shot notes in ON AIR.
 - START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. AND WE'VE GOT A LOT HITTING THE SHOP TODAY.
 - **Enunciation (INLINE):** phonetic in parentheses **on first mention only** next to the word — short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye). Real acronyms spelled: A I, G P U.
-- **Close:** After your last **news** beat, **before** the two fixed END lines: **one** tight **ALL CAPS** line (two only if still under word budget) mixing **Linden Hills** color with **${localBizName}** spoken **once** by name (required — see LINDEN HILLS block). Never **shoutout**, **shout-out**, **hard-sell**, or “GO CHECK THEM OUT” (friendly neighbor plug is OK — see LINDEN HILLS block).
+- **Close:** After your last **news** beat, **before** the two fixed END lines: **one** tight **ALL CAPS** line (two only if still under word budget) mixing **Linden Hills** color with **${localBizName}** spoken **once** by name (required — see LINDEN HILLS block). Keep it **scene-setting**, not promotional. Never **shoutout**, **shout-out**, **hard-sell**, “GO CHECK THEM OUT,” or any direct call to action.
 - END exactly (literal, final two sentences of ON AIR): BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
 
 ---
