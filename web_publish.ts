@@ -475,7 +475,7 @@ export async function writeTechNewsWebBundle(
   const storiesOrdered = sortStoriesForBlogOrder(stories, blogOrder);
   if (blogOrder === 'newest' && stories.length > 1) {
     console.log(
-      `WEB: blog story order = newest-first (set TECHNEWS_BLOG_STORY_ORDER=script for <<<SOURCES>>> order)`
+      `WEB: blog story order = script (set TECHNEWS_BLOG_STORY_ORDER=script for <<<SOURCES>>> order)`
     );
   }
 
