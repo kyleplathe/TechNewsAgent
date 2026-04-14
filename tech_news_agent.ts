@@ -498,21 +498,26 @@ function countApproxNewsBeats(onAir: string): number {
 function validateStudioOutput(
   onAir: string,
   indices: number[],
-  localBizName: string
+  localBizName: string,
+  selectedStories: Collected[],
+  hasFreshSkateCandidate: boolean
 ): string[] {
   const issues: string[] = [];
-  const lower = onAir.toLowerCase();
   const sourceCount = indices.length;
   if (sourceCount !== TARGET_SOURCE_STORIES) {
     issues.push(
       `SOURCES must include exactly ${TARGET_SOURCE_STORIES} story numbers; got ${sourceCount}.`
     );
   }
-  if (/\blinx\b/i.test(lower)) {
-    issues.push('ON AIR includes "Linx" typo.');
+  const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
+  const hasSkateSelected = selectedStories.some((s) => s.section === 'SKATE');
+  if (!hasWolvesSelected && hasFreshSkateCandidate && !hasSkateSelected) {
+    issues.push(
+      'When no Timberwolves story is selected and fresh skate exists, include one SKATE story.'
+    );
   }
-  if (/\blake street\b/i.test(lower)) {
-    issues.push('ON AIR mentions Lake Street instead of neighborhood close cues.');
+  if (/\blake street\b/i.test(onAir)) {
+    issues.push('ON AIR must not mention Lake Street.');
   }
   const bizMentions = countBusinessMentions(onAir, localBizName);
   if (bizMentions !== 1) {
@@ -935,9 +940,11 @@ async function runNewsAgent() {
 - **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first** (publish time). When several headlines are similarly strong, prefer the **newer** item.
 - **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~90s**.
 - **Culture / sports slot:** **Prefer at most one** of **[SKATE]** or **Wolves** (**[LOCAL]**). If you use **both**, each must be **one sentence** and you must still hit the **~90s** / **word budget** (almost always pick **one**).
+- **Fallback sports cue:** If no Wolves beat makes the cut and there is a fresh **[SKATE]** item in this list, include **one SKATE beat**.
 - **Hardware** only when it clearly earns it; never force a gadget beat.`;
 
   const hasWolves = collected.some((c) => c.section === 'LOCAL');
+  const hasSkate = collected.some((c) => c.section === 'SKATE');
 
   const pickedBiz = pickLocalBusiness();
   const localBizName =
@@ -1114,7 +1121,16 @@ ${localColorBlock}
     indices = parsed.indices;
     modelSocial = parsed.social;
     onAirForEmail = ensureLocalBusinessInOnAir(fixedOnAir, localBizName);
-    validationIssues = validateStudioOutput(onAirForEmail, indices, localBizName);
+    const selectedStories = indices
+      .map((i) => collected[i - 1])
+      .filter((c): c is Collected => Boolean(c));
+    validationIssues = validateStudioOutput(
+      onAirForEmail,
+      indices,
+      localBizName,
+      selectedStories,
+      hasSkate
+    );
     if (!validationIssues.length) break;
     if (pass <= maxValidationRetries) {
       console.warn(
