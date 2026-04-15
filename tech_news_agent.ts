@@ -523,11 +523,19 @@ function validateStudioOutput(
       `SOURCES must include exactly ${TARGET_SOURCE_STORIES} story numbers; got ${sourceCount}.`
     );
   }
+  const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
   const hasSkateSelected = selectedStories.some((s) => s.section === 'SKATE');
   if (hasFreshSkateCandidate && !hasSkateSelected) {
     issues.push(
       'When a fresh skate story exists, include one SKATE story in SOURCES.'
     );
+  }
+  // Keep ON AIR mentions aligned with chosen source sections.
+  if (!hasWolvesSelected && /\b(timberwolves|wolves)\b/i.test(onAir)) {
+    issues.push('ON AIR mentions Wolves but SOURCES does not include a LOCAL story.');
+  }
+  if (!hasSkateSelected && /\b(skate|skateboard|skateboarding)\b/i.test(onAir)) {
+    issues.push('ON AIR mentions skate but SOURCES does not include a SKATE story.');
   }
   if (/\blake street\b/i.test(onAir)) {
     issues.push('ON AIR must not mention Lake Street.');
@@ -609,64 +617,6 @@ function toOrderedUniqueSourceIndices(indices: number[], maxIndex: number): numb
     out.push(n);
   }
   return out;
-}
-
-function compareStoryFreshness(a: Collected, b: Collected): number {
-  const ta = parseDateSafe(a.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
-  const tb = parseDateSafe(b.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
-  return tb - ta;
-}
-
-function findFreshestIndexBySection(
-  collected: Collected[],
-  section: Collected['section']
-): number | null {
-  let bestIdx = -1;
-  for (let i = 0; i < collected.length; i++) {
-    const c = collected[i];
-    if (!c || c.section !== section) continue;
-    if (!c.link?.trim()) continue;
-    if (bestIdx < 0 || compareStoryFreshness(c, collected[bestIdx]!) < 0) {
-      bestIdx = i;
-    }
-  }
-  return bestIdx >= 0 ? bestIdx + 1 : null;
-}
-
-function pickFreshestCultureIndex(collected: Collected[]): number | null {
-  const skateIdx = findFreshestIndexBySection(collected, 'SKATE');
-  if (skateIdx) return skateIdx;
-  return findFreshestIndexBySection(collected, 'LOCAL');
-}
-
-/**
- * Hard guardrail after model output:
- * ensure exactly one culture/sports source slot ([LOCAL] or [SKATE]) and force it to the freshest
- * available candidate with a URL so screenshot + source-link output remains complete.
- */
-function enforceFreshCultureSlot(
-  indices: number[],
-  collected: Collected[],
-  targetCount: number
-): number[] {
-  const normalized = toOrderedUniqueSourceIndices(indices, collected.length);
-  const freshestCulture = pickFreshestCultureIndex(collected);
-  if (!freshestCulture) return normalized.slice(0, targetCount);
-
-  const isCulture = (idx: number): boolean => {
-    const sec = collected[idx - 1]?.section;
-    return sec === 'LOCAL' || sec === 'SKATE';
-  };
-
-  const firstCulturePos = normalized.findIndex((i) => isCulture(i));
-  const withoutCulture = normalized.filter((i) => !isCulture(i));
-  const insertPos = firstCulturePos >= 0 ? Math.min(firstCulturePos, withoutCulture.length) : withoutCulture.length;
-  const merged = [
-    ...withoutCulture.slice(0, insertPos),
-    freshestCulture,
-    ...withoutCulture.slice(insertPos),
-  ];
-  return merged.slice(0, targetCount);
 }
 
 /**
@@ -1098,6 +1048,7 @@ ${storyPickRule}
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
 - **Wolves / LOCAL** — **Canis Hoopus (RSS)** plus **NBA.com Timberwolves** index (same **[LOCAL]** list). Use the basketball beat **only** when the item is **fresh**; if nothing qualifies, **skip Wolves** entirely.
 - Skateboarding: use **[SKATE]** for one quick, legit beat (premiere, contest, real news). Skip if nothing’s good.
+- **Section/source lock:** Do **not** mention Wolves unless a **[LOCAL]** story number is in **<<<SOURCES>>>**. Do **not** mention skate unless a **[SKATE]** number is in **<<<SOURCES>>>**.
 - **Length (non-negotiable):** One vertical take **~90 seconds** — treat **~85s as a soft floor** and **~95s as a hard ceiling** at a calm read. **Budget ~175–215 spoken words** between the fixed START line and the fixed END lines (ALL CAPS reads a little slow — stay lean). **If you are over budget, cut beats** before you cut the **${localBizName}** close.
 - **No extra headlines:** In **ON AIR**, cover **only** the stories whose numbers you list in **<<<SOURCES>>>**. No bonus or side mentions outside those ${TARGET_SOURCE_STORIES} picks.
 - **Tight but not thin:** On **main** beats only, add **one concrete detail** when the headline gives you something real (a number, vendor, mechanism) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
@@ -1243,9 +1194,8 @@ ${localColorBlock}
     rawOut = await generateWithBackoff(requestText);
     const parsed = parseStudioOutput(rawOut, collected.length);
     fixedOnAir = parsed.onAir.trim();
-    indices = enforceFreshCultureSlot(
-      parsed.indices,
-      collected,
+    indices = toOrderedUniqueSourceIndices(parsed.indices, collected.length).slice(
+      0,
       TARGET_SOURCE_STORIES
     );
     modelSocial = parsed.social;
