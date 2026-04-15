@@ -523,11 +523,10 @@ function validateStudioOutput(
       `SOURCES must include exactly ${TARGET_SOURCE_STORIES} story numbers; got ${sourceCount}.`
     );
   }
-  const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
   const hasSkateSelected = selectedStories.some((s) => s.section === 'SKATE');
-  if (!hasWolvesSelected && hasFreshSkateCandidate && !hasSkateSelected) {
+  if (hasFreshSkateCandidate && !hasSkateSelected) {
     issues.push(
-      'When no Timberwolves story is selected and fresh skate exists, include one SKATE story.'
+      'When a fresh skate story exists, include one SKATE story in SOURCES.'
     );
   }
   if (/\blake street\b/i.test(onAir)) {
@@ -635,14 +634,9 @@ function findFreshestIndexBySection(
 }
 
 function pickFreshestCultureIndex(collected: Collected[]): number | null {
-  const localIdx = findFreshestIndexBySection(collected, 'LOCAL');
   const skateIdx = findFreshestIndexBySection(collected, 'SKATE');
-  if (!localIdx && !skateIdx) return null;
-  if (!localIdx) return skateIdx;
-  if (!skateIdx) return localIdx;
-  const local = collected[localIdx - 1]!;
-  const skate = collected[skateIdx - 1]!;
-  return compareStoryFreshness(local, skate) <= 0 ? localIdx : skateIdx;
+  if (skateIdx) return skateIdx;
+  return findFreshestIndexBySection(collected, 'LOCAL');
 }
 
 /**
@@ -1045,9 +1039,9 @@ async function runNewsAgent() {
 - **Lineup shape (default):** Build **${CORE_SOURCE_STORIES} core beats** (REPAIR/TECH/HARDWARE) **plus ${CULTURE_SOURCE_STORIES} culture/sports beat** (**[LOCAL]** Timberwolves or **[SKATE]**), then do the neighborhood close.
 - **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first** (publish time). When several headlines are similarly strong, prefer the **newer** item.
 - **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~90s**.
-- **Culture / sports slot:** **Prefer at most one** of **[SKATE]** or **Wolves** (**[LOCAL]**). If you use **both**, each must be **one sentence** and you must still hit the **~90s** / **word budget** (almost always pick **one**).
-- **Hard freshness check (sports/culture):** Always compare **[LOCAL] Timberwolves** and **[SKATE]** candidates, then keep the **single freshest** one for the show when either lane is used.
-- **Fallback sports cue:** If no Wolves beat makes the cut and there is a fresh **[SKATE]** item in this list, include **one SKATE beat**.
+- **Culture / sports slot:** Keep this as **one beat**. Use **[SKATE]** when a fresh skate item exists; if not, use a fresh **Wolves** (**[LOCAL]**) beat.
+- **Hard slot rule (sports/culture):** The 5th beat should be **SKATE first**, with **Wolves fallback** only when skate has no fresh candidate.
+- **Fallback sports cue:** If skate is unavailable, use one fresh **Wolves** beat; if both are unavailable, keep the 4 core beats and close.
 - **Hardware** only when it clearly earns it; never force a gadget beat.`;
 
   const hasWolves = collected.some((c) => c.section === 'LOCAL');
