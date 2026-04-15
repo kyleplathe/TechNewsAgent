@@ -1329,10 +1329,17 @@ ${localColorBlock}
   }> = [];
 
   if (envScreenshotsEnabled() && screenshotItems.length) {
+    const requestedScreenshotMax =
+      Math.max(1, parseInt(process.env.SCREENSHOT_MAX ?? '12', 10) || 12);
     const max = Math.min(
       12,
-      Math.max(1, parseInt(process.env.SCREENSHOT_MAX ?? '12', 10) || 12)
+      Math.max(TARGET_SOURCE_STORIES, requestedScreenshotMax)
     );
+    if (requestedScreenshotMax < TARGET_SOURCE_STORIES) {
+      console.warn(
+        `SCREENSHOT_MAX=${requestedScreenshotMax} is below required source count (${TARGET_SOURCE_STORIES}); raising screenshot cap to ${max}.`
+      );
+    }
     const slice = screenshotItems.slice(0, max);
     console.log(
       `Capturing ${slice.length} source screenshot(s) (Playwright / Chromium)…`
