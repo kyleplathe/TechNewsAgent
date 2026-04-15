@@ -8,11 +8,11 @@ const xml = new XMLParser({
 
 function asString(v: unknown): string {
   if (v == null) return '';
-  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'string') return decodeHtmlEntities(v).trim();
   if (typeof v === 'object' && v !== null && '#text' in v) {
-    return String((v as { '#text': string })['#text']).trim();
+    return decodeHtmlEntities(String((v as { '#text': string })['#text'])).trim();
   }
-  return String(v).trim();
+  return decodeHtmlEntities(String(v)).trim();
 }
 
 function asArray<T>(v: T | T[] | undefined): T[] {
@@ -28,6 +28,37 @@ function atomLinkHref(link: unknown): string {
     }
   }
   return '';
+}
+
+function decodeHtmlEntities(input: string): string {
+  if (!input || !input.includes('&')) return input;
+  const named: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+    rsquo: "'",
+    lsquo: "'",
+    rdquo: '"',
+    ldquo: '"',
+    ndash: '-',
+    mdash: '-',
+    hellip: '...',
+  };
+  return input.replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]+);/gi, (full, token: string) => {
+    const t = token.toLowerCase();
+    if (t.startsWith('#x')) {
+      const cp = parseInt(t.slice(2), 16);
+      return Number.isFinite(cp) ? String.fromCodePoint(cp) : full;
+    }
+    if (t.startsWith('#')) {
+      const cp = parseInt(t.slice(1), 10);
+      return Number.isFinite(cp) ? String.fromCodePoint(cp) : full;
+    }
+    return named[t] ?? full;
+  });
 }
 
 export type ParsedFeed = {

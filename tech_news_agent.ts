@@ -325,8 +325,10 @@ const M_VIDEO = '<<<VIDEO_PROMPT>>>';
 const M_ONAIR = '<<<ON_AIR>>>';
 const M_SOURCES = '<<<SOURCES>>>';
 const M_SOCIAL = '<<<SOCIAL>>>';
-const MAX_SOURCE_STORIES = 4;
-const TARGET_SOURCE_STORIES = 4;
+const CORE_SOURCE_STORIES = 4;
+const CULTURE_SOURCE_STORIES = 1;
+const TARGET_SOURCE_STORIES = CORE_SOURCE_STORIES + CULTURE_SOURCE_STORIES;
+const MAX_SOURCE_STORIES = TARGET_SOURCE_STORIES;
 
 function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
   const numLine = afterSources.split(/\n/)[0] ?? '';
@@ -539,7 +541,7 @@ function validateStudioOutput(
     issues.push(`ON AIR must mention "${localBizName}" exactly once; got ${bizMentions}.`);
   }
   const beatCount = countApproxNewsBeats(onAir);
-  const maxAllowedBeats = TARGET_SOURCE_STORIES + 1; // 4 sources + neighborhood close
+  const maxAllowedBeats = TARGET_SOURCE_STORIES + 1; // story beats + neighborhood close
   if (beatCount > maxAllowedBeats) {
     issues.push(
       `ON AIR appears to contain too many beats (${beatCount}); keep to ${TARGET_SOURCE_STORIES} story beats plus close.`
@@ -1039,7 +1041,8 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const storyPickRule = `- **<<<SOURCES>>> length = slide count:** Pick **exactly ${TARGET_SOURCE_STORIES} story numbers** total (**never 5+**).
+  const storyPickRule = `- **<<<SOURCES>>> length = slide count:** Pick **exactly ${TARGET_SOURCE_STORIES} story numbers** total (**never ${TARGET_SOURCE_STORIES + 1}+**).
+- **Lineup shape (default):** Build **${CORE_SOURCE_STORIES} core beats** (REPAIR/TECH/HARDWARE) **plus ${CULTURE_SOURCE_STORIES} culture/sports beat** (**[LOCAL]** Timberwolves or **[SKATE]**), then do the neighborhood close.
 - **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first** (publish time). When several headlines are similarly strong, prefer the **newer** item.
 - **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~90s**.
 - **Culture / sports slot:** **Prefer at most one** of **[SKATE]** or **Wolves** (**[LOCAL]**). If you use **both**, each must be **one sentence** and you must still hit the **~90s** / **word budget** (almost always pick **one**).
@@ -1129,7 +1132,7 @@ ${localColorBlock}
 (ALL CAPS — one take, **~90s** with **~175–215 words** between START and END; same order as SOURCES; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
 
 <<<SOURCES>>>
-(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`2,5,7,9\` = story **2**, then **5**, then **7**, then **9**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
+(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`2,5,7,9,11\` = story **2**, then **5**, then **7**, then **9**, then **11**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
 
 <<<SOCIAL>>>
 (**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**, 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler. **Write in sentence case** (normal Facebook / Instagram style): capitalize the first word and proper nouns only. **Do not** use ALL CAPS, title case for the whole paragraph, or fake emphasis — platforms flag shouty text as low quality. Standard tech spellings are fine (OpenAI, iPhone, GPU). No “link in bio,” no explaining screenshots. Threads-length.)
