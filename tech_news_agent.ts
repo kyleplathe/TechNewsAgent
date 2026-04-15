@@ -596,6 +596,83 @@ function parseDateSafe(v: string): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
+function toOrderedUniqueSourceIndices(indices: number[], maxIndex: number): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const i of indices) {
+    if (!Number.isFinite(i)) continue;
+    const n = Math.trunc(i);
+    if (n < 1 || n > maxIndex) continue;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+function compareStoryFreshness(a: Collected, b: Collected): number {
+  const ta = parseDateSafe(a.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const tb = parseDateSafe(b.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
+  return tb - ta;
+}
+
+function findFreshestIndexBySection(
+  collected: Collected[],
+  section: Collected['section']
+): number | null {
+  let bestIdx = -1;
+  for (let i = 0; i < collected.length; i++) {
+    const c = collected[i];
+    if (!c || c.section !== section) continue;
+    if (!c.link?.trim()) continue;
+    if (bestIdx < 0 || compareStoryFreshness(c, collected[bestIdx]!) < 0) {
+      bestIdx = i;
+    }
+  }
+  return bestIdx >= 0 ? bestIdx + 1 : null;
+}
+
+function pickFreshestCultureIndex(collected: Collected[]): number | null {
+  const localIdx = findFreshestIndexBySection(collected, 'LOCAL');
+  const skateIdx = findFreshestIndexBySection(collected, 'SKATE');
+  if (!localIdx && !skateIdx) return null;
+  if (!localIdx) return skateIdx;
+  if (!skateIdx) return localIdx;
+  const local = collected[localIdx - 1]!;
+  const skate = collected[skateIdx - 1]!;
+  return compareStoryFreshness(local, skate) <= 0 ? localIdx : skateIdx;
+}
+
+/**
+ * Hard guardrail after model output:
+ * ensure exactly one culture/sports source slot ([LOCAL] or [SKATE]) and force it to the freshest
+ * available candidate with a URL so screenshot + source-link output remains complete.
+ */
+function enforceFreshCultureSlot(
+  indices: number[],
+  collected: Collected[],
+  targetCount: number
+): number[] {
+  const normalized = toOrderedUniqueSourceIndices(indices, collected.length);
+  const freshestCulture = pickFreshestCultureIndex(collected);
+  if (!freshestCulture) return normalized.slice(0, targetCount);
+
+  const isCulture = (idx: number): boolean => {
+    const sec = collected[idx - 1]?.section;
+    return sec === 'LOCAL' || sec === 'SKATE';
+  };
+
+  const firstCulturePos = normalized.findIndex((i) => isCulture(i));
+  const withoutCulture = normalized.filter((i) => !isCulture(i));
+  const insertPos = firstCulturePos >= 0 ? Math.min(firstCulturePos, withoutCulture.length) : withoutCulture.length;
+  const merged = [
+    ...withoutCulture.slice(0, insertPos),
+    freshestCulture,
+    ...withoutCulture.slice(insertPos),
+  ];
+  return merged.slice(0, targetCount);
+}
+
 /**
  * Default freshness (hours). Override per section with `MAX_STORY_AGE_HOURS_TECH`, `_HARDWARE`,
  * `_SKATE`, `_LOCAL`, `_REPAIR` in `.env`.
@@ -966,6 +1043,7 @@ async function runNewsAgent() {
 - **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first** (publish time). When several headlines are similarly strong, prefer the **newer** item.
 - **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~90s**.
 - **Culture / sports slot:** **Prefer at most one** of **[SKATE]** or **Wolves** (**[LOCAL]**). If you use **both**, each must be **one sentence** and you must still hit the **~90s** / **word budget** (almost always pick **one**).
+- **Hard freshness check (sports/culture):** Always compare **[LOCAL] Timberwolves** and **[SKATE]** candidates, then keep the **single freshest** one for the show when either lane is used.
 - **Fallback sports cue:** If no Wolves beat makes the cut and there is a fresh **[SKATE]** item in this list, include **one SKATE beat**.
 - **Hardware** only when it clearly earns it; never force a gadget beat.`;
 
@@ -1168,7 +1246,11 @@ ${localColorBlock}
     rawOut = await generateWithBackoff(requestText);
     const parsed = parseStudioOutput(rawOut, collected.length);
     fixedOnAir = parsed.onAir.trim();
-    indices = parsed.indices;
+    indices = enforceFreshCultureSlot(
+      parsed.indices,
+      collected,
+      TARGET_SOURCE_STORIES
+    );
     modelSocial = parsed.social;
     onAirForEmail = ensureLocalBusinessInOnAir(fixedOnAir, localBizName);
     const selectedStories = indices
