@@ -93,6 +93,17 @@ Local (auto-discover by token): `YOUTUBE_API_KEY=... npm run youtube:sync -- --n
 
 Resend, Gemini, `RESEND_TO`, optional `FEED_ITEM_LIMIT`, `SCREENSHOT_*`, `GEMINI_MODEL`, optional `USE_ON_AIR_SOURCE_REORDER`, `TECHNEWS_BLOG_STORY_ORDER`, `LOCAL_BIZ_WEBSITE`, etc. Never commit `.env`.
 
+### Culture slot override (Skate vs Timberwolves)
+
+By default, the show prefers a **SKATE** beat when a fresh skate story exists, with **Timberwolves** as fallback.
+
+**Hard rule:** a single episode may include **at most one** Timberwolves story in `<<<SOURCES>>>` (prevents double-Wolves posts on the blog).
+
+To force one lane for a run (and prevent “swap-back” by the model), set:
+
+- `CULTURE_SECTION_MODE=SKATE` — fetch **skate** feeds only (no Wolves candidates).
+- `CULTURE_SECTION_MODE=LOCAL` — fetch **Wolves** feeds only (no skate candidates).
+
 ## TechNews web bundle (optional)
 
 Set **`TECHNEWS_WEB_DIR`** to an absolute or relative path; after a **successful Resend send** the agent writes **`latest.json`**, **`images/*.jpg`** (when screenshots exist), and **`technews.html`** (static shell; disable with `TECHNEWS_WEB_HTML=0`). Talking-point text per story is parsed from the **VIDEO PROMPT** **STORY** blocks (legacy **`##`** Markdown still supported). Optional **`TECHNEWS_PUBLIC_BASE_URL`** (no trailing slash) adds absolute `imageUrl` fields for hosting images on a CDN. Deploy the folder to any static host (S3/Cloudflare R2 website, Netlify, Vercel static, etc.) or sync from CI; the page loads `latest.json` via `fetch` (needs HTTP(S), not `file://`).

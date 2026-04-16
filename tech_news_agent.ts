@@ -313,6 +313,15 @@ type Collected = {
   date: string;
 };
 
+type CultureSectionMode = 'AUTO' | 'SKATE' | 'LOCAL';
+
+function cultureSectionMode(): CultureSectionMode {
+  const raw = (process.env.CULTURE_SECTION_MODE ?? '').trim().toUpperCase();
+  if (raw === 'SKATE') return 'SKATE';
+  if (raw === 'LOCAL' || raw === 'WOLVES' || raw === 'TIMBERWOLVES') return 'LOCAL';
+  return 'AUTO';
+}
+
 type AirLogEntry = {
   fingerprint: string;
   title: string;
@@ -523,6 +532,12 @@ function validateStudioOutput(
       `SOURCES must include exactly ${TARGET_SOURCE_STORIES} story numbers; got ${sourceCount}.`
     );
   }
+  const localCount = selectedStories.filter((s) => s.section === 'LOCAL').length;
+  if (localCount > 1) {
+    issues.push(
+      `SOURCES must include at most 1 LOCAL (Timberwolves) story; got ${localCount}.`
+    );
+  }
   const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
   const hasSkateSelected = selectedStories.some((s) => s.section === 'SKATE');
   if (hasFreshSkateCandidate && !hasSkateSelected) {
@@ -571,6 +586,58 @@ function titleFingerprint(title: string): string {
     .filter((t) => t.length >= 3 && !stop.has(t))
     .slice(0, 8);
   return tokens.join(' ');
+}
+
+function enforceSourceSectionCaps(
+  indices: number[],
+  collected: Collected[],
+  targetCount: number
+): number[] {
+  // Hard rule: never publish 2 Wolves stories in one episode.
+  const keep: number[] = [];
+  const seen = new Set<number>();
+  let keptLocal = 0;
+  let keptSkate = 0;
+
+  for (const idx of indices) {
+    if (keep.length >= targetCount) break;
+    if (!Number.isFinite(idx)) continue;
+    const n = Math.trunc(idx);
+    if (n < 1 || n > collected.length) continue;
+    if (seen.has(n)) continue;
+    const c = collected[n - 1];
+    if (!c) continue;
+
+    if (c.section === 'LOCAL') {
+      if (keptLocal >= 1) continue;
+      keptLocal++;
+    }
+    if (c.section === 'SKATE') {
+      // Not currently a problem, but keep this tight too.
+      if (keptSkate >= 1) continue;
+      keptSkate++;
+    }
+    seen.add(n);
+    keep.push(n);
+  }
+
+  if (keep.length >= targetCount) return keep;
+
+  // Top up using newest-first collected list order, avoiding extra LOCAL/SKATE.
+  for (let i = 1; i <= collected.length && keep.length < targetCount; i++) {
+    if (seen.has(i)) continue;
+    const c = collected[i - 1];
+    if (!c) continue;
+    if (!c.link) continue;
+    if (c.section === 'LOCAL' && keptLocal >= 1) continue;
+    if (c.section === 'SKATE' && keptSkate >= 1) continue;
+    if (c.section === 'LOCAL') keptLocal++;
+    if (c.section === 'SKATE') keptSkate++;
+    seen.add(i);
+    keep.push(i);
+  }
+
+  return keep;
 }
 
 function productKey(title: string): string {
@@ -800,6 +867,10 @@ async function runNewsAgent() {
     Math.max(1, parseInt(process.env.FEED_ITEM_LIMIT ?? '4', 10) || 4)
   );
 
+  const cultureMode = cultureSectionMode();
+  const fetchSkate = cultureMode !== 'LOCAL';
+  const fetchLocal = cultureMode !== 'SKATE';
+
   /** Repair-first pool: bench fixes, right-to-repair, teardowns, serviceability. */
   const repairFeeds = [
     'https://www.ifixit.com/News/rss',
@@ -881,32 +952,34 @@ async function runNewsAgent() {
   await pull(repairFeeds, 'REPAIR');
   await pull(techFeeds, 'TECH');
   await pull(hardwareFeeds, 'HARDWARE');
-  await pull(skateFeeds, 'SKATE');
-  await pull(localFeeds, 'LOCAL');
+  if (fetchSkate) await pull(skateFeeds, 'SKATE');
+  if (fetchLocal) await pull(localFeeds, 'LOCAL');
 
-  try {
-    const { fetchTimberwolvesNewsFromNbaCom } = await import('./nba_wolves_news');
-    const nbaWolves = await fetchTimberwolvesNewsFromNbaCom();
-    const cap = Math.min(20, Math.max(1, perFeed));
-    let added = 0;
-    for (const item of nbaWolves) {
-      if (added >= cap) break;
-      collected.push({
-        section: 'LOCAL',
-        feedTitle: 'NBA.com — Minnesota Timberwolves',
-        title: item.title,
-        link: item.link,
-        date: item.date,
-      });
-      added++;
+  if (fetchLocal) {
+    try {
+      const { fetchTimberwolvesNewsFromNbaCom } = await import('./nba_wolves_news');
+      const nbaWolves = await fetchTimberwolvesNewsFromNbaCom();
+      const cap = Math.min(20, Math.max(1, perFeed));
+      let added = 0;
+      for (const item of nbaWolves) {
+        if (added >= cap) break;
+        collected.push({
+          section: 'LOCAL',
+          feedTitle: 'NBA.com — Minnesota Timberwolves',
+          title: item.title,
+          link: item.link,
+          date: item.date,
+        });
+        added++;
+      }
+      if (added) {
+        console.log(
+          `  NBA.com Timberwolves (embedded index) → ${added} stor${added === 1 ? 'y' : 'ies'} (cap ${cap})`
+        );
+      }
+    } catch (e) {
+      console.warn('NBA.com Timberwolves index fetch failed:', e);
     }
-    if (added) {
-      console.log(
-        `  NBA.com Timberwolves (embedded index) → ${added} stor${added === 1 ? 'y' : 'ies'} (cap ${cap})`
-      );
-    }
-  } catch (e) {
-    console.warn('NBA.com Timberwolves index fetch failed:', e);
   }
 
   if (!collected.length) {
@@ -985,11 +1058,19 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
+  const cultureRule =
+    cultureMode === 'SKATE'
+      ? '- **Culture slot (forced):** Include **one [SKATE]** beat (when any skate item exists). **Do not** include **[LOCAL]** Timberwolves on this run.'
+      : cultureMode === 'LOCAL'
+        ? '- **Culture slot (forced):** Include **one [LOCAL]** Timberwolves beat (when any Wolves item exists). **Do not** include **[SKATE]** on this run.'
+        : '- **Culture / sports slot:** Keep this as **one beat**. Use **[SKATE]** when a fresh skate item exists; if not, use a fresh **Wolves** (**[LOCAL]**) beat.';
+
   const storyPickRule = `- **<<<SOURCES>>> length = slide count:** Pick **exactly ${TARGET_SOURCE_STORIES} story numbers** total (**never ${TARGET_SOURCE_STORIES + 1}+**).
 - **Lineup shape (default):** Build **${CORE_SOURCE_STORIES} core beats** (REPAIR/TECH/HARDWARE) **plus ${CULTURE_SOURCE_STORIES} culture/sports beat** (**[LOCAL]** Timberwolves or **[SKATE]**), then do the neighborhood close.
+- **One Wolves item max:** You may include **at most one [LOCAL] Timberwolves** story number in **<<<SOURCES>>>**. Never pick two Wolves items in the same episode.
 - **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first** (publish time). When several headlines are similarly strong, prefer the **newer** item.
 - **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~90s**.
-- **Culture / sports slot:** Keep this as **one beat**. Use **[SKATE]** when a fresh skate item exists; if not, use a fresh **Wolves** (**[LOCAL]**) beat.
+- ${cultureRule}
 - **Hard slot rule (sports/culture):** The 5th beat should be **SKATE first**, with **Wolves fallback** only when skate has no fresh candidate.
 - **Fallback sports cue:** If skate is unavailable, use one fresh **Wolves** beat; if both are unavailable, keep the 4 core beats and close.
 - **Hardware** only when it clearly earns it; never force a gadget beat.`;
@@ -1194,8 +1275,9 @@ ${localColorBlock}
     rawOut = await generateWithBackoff(requestText);
     const parsed = parseStudioOutput(rawOut, collected.length);
     fixedOnAir = parsed.onAir.trim();
-    indices = toOrderedUniqueSourceIndices(parsed.indices, collected.length).slice(
-      0,
+    indices = enforceSourceSectionCaps(
+      toOrderedUniqueSourceIndices(parsed.indices, collected.length),
+      collected,
       TARGET_SOURCE_STORIES
     );
     modelSocial = parsed.social;
