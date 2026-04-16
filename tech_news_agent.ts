@@ -5,6 +5,13 @@ import {
   chicagoDateSlug,
   getChicagoEpisodeNow,
 } from './web_publish';
+import {
+  finalizeSocialCaption,
+  formatSocialHeadline,
+  normalizeSocialBodySentenceCase,
+  stripHashtagLines,
+} from './lib/social';
+import { parseStudioOutput } from './lib/studio_parse';
 import { Resend } from 'resend';
 import {
   LOCAL_INTERSECTION_CENTER,
@@ -74,24 +81,6 @@ async function getTickerData(): Promise<string> {
   return `BTC: ${btcPrice}  |  BLOCK: ${blockHeight}  |  ${today}  |  LIVE FROM LINDEN HILLS`;
 }
 
-/** First line of Threads / Reels description (fixed branding + date). */
-function formatSocialHeadline(): string {
-  const tz = 'America/Chicago';
-  const when = new Date().toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: tz,
-  });
-  return `Tech News Daily with Kyle · ${when}`;
-}
-
-const THREADS_CAP = 500;
-
-const SOCIAL_READ_MORE_NEWS =
-  'Read all the latest Tech News articles at instakyle.tech/news';
-
 function buildShortTagsFromUsed(used: Collected[]): string {
   const tags = ['#TechNews'];
   if (used.some((c) => c.section === 'LOCAL')) tags.push('#Timberwolves');
@@ -129,89 +118,6 @@ function fallbackSocialBodyFromUsed(used: Collected[]): string {
   const parts = used.slice(0, 3).map((c) => clipTitleForCaption(c.title, 52));
   const t = parts.join(' · ');
   return t || 'Fresh tech from the Linden Hills bench.';
-}
-
-/** Keeps total length within Threads-style limits (~500 chars). */
-function finalizeSocialCaption(
-  headline: string,
-  body: string,
-  tags: string
-): string {
-  const ctaBlock = `\n\n${SOCIAL_READ_MORE_NEWS}\n\n`;
-  let b = body.trim().replace(/\s+/g, ' ').slice(0, 400);
-  if (!b) b = 'Daily roundup from the bench.';
-  let s = `${headline}\n\n${b}${ctaBlock}${tags}`;
-  if (s.length <= THREADS_CAP) return s;
-  const overhead =
-    headline.length +
-    tags.length +
-    ctaBlock.length +
-    4; /* two newlines around body */
-  const maxBody = Math.max(40, THREADS_CAP - overhead - 1);
-  b = b.slice(0, Math.max(1, maxBody - 1)) + '…';
-  s = `${headline}\n\n${b}${ctaBlock}${tags}`;
-  return s.length <= THREADS_CAP ? s : s.slice(0, THREADS_CAP);
-}
-
-function stripHashtagLines(input: string): string {
-  const lines = input
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const kept = lines.filter((l) => !l.startsWith('#'));
-  return kept.join(' ').trim();
-}
-
-/** Letters-only ratio of A–Z — models sometimes echo ON AIR and paste ALL CAPS into <<<SOCIAL>>>. */
-function isMostlyUppercaseLatin(text: string): boolean {
-  const letters = text.replace(/[^A-Za-z]/g, '');
-  if (letters.length < 8) return false;
-  const up = [...letters].filter((c) => c >= 'A' && c <= 'Z').length;
-  return up / letters.length >= 0.72;
-}
-
-/**
- * Facebook / Meta often downranks ALL CAPS as distracting. Convert shouty model output to
- * sentence case and restore common tech brand spellings.
- */
-function normalizeSocialBodySentenceCase(body: string): string {
-  const t = body.trim();
-  if (!t || !isMostlyUppercaseLatin(t)) return t;
-
-  let s = t.toLowerCase();
-  s = s.replace(/^\s*([a-z])/, (m) => m.toUpperCase());
-  s = s.replace(/([.!?])\s+([a-z])/g, (_, end: string, c: string) => `${end} ${c.toUpperCase()}`);
-
-  const fixes: Array<[RegExp, string]> = [
-    [/\bai\b/g, 'AI'],
-    [/\bapi\b/g, 'API'],
-    [/\bgpu\b/g, 'GPU'],
-    [/\bcpu\b/gi, 'CPU'],
-    [/\bcpus\b/gi, 'CPUs'],
-    [/\bios\b/gi, 'iOS'],
-    [/\bipados\b/gi, 'iPadOS'],
-    [/\biphone\b/gi, 'iPhone'],
-    [/\bipad\b/gi, 'iPad'],
-    [/\bmacos\b/gi, 'macOS'],
-    [/\bwatchos\b/gi, 'watchOS'],
-    [/\btvos\b/gi, 'tvOS'],
-    [/\bvisionos\b/gi, 'visionOS'],
-    [/\busb\b/gi, 'USB'],
-    [/\bssd\b/gi, 'SSD'],
-    [/\bram\b/gi, 'RAM'],
-    [/\bnba\b/gi, 'NBA'],
-    [/\bopenai\b/gi, 'OpenAI'],
-    [/\bgithub\b/gi, 'GitHub'],
-    [/\byoutube\b/gi, 'YouTube'],
-    [/\blinden hills\b/gi, 'Linden Hills'],
-    [/\btimberwolves\b/gi, 'Timberwolves'],
-    [/\bminneapolis\b/gi, 'Minneapolis'],
-  ];
-  for (const [re, rep] of fixes) {
-    s = s.replace(re, rep);
-  }
-  return s;
 }
 
 function mapSectionForBlog(
@@ -330,74 +236,10 @@ type AirLogEntry = {
   airedAt: string;
 };
 
-const M_VIDEO = '<<<VIDEO_PROMPT>>>';
-const M_ONAIR = '<<<ON_AIR>>>';
-const M_SOURCES = '<<<SOURCES>>>';
-const M_SOCIAL = '<<<SOCIAL>>>';
 const CORE_SOURCE_STORIES = 4;
 const CULTURE_SOURCE_STORIES = 1;
 const TARGET_SOURCE_STORIES = CORE_SOURCE_STORIES + CULTURE_SOURCE_STORIES;
 const MAX_SOURCE_STORIES = TARGET_SOURCE_STORIES;
-
-function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
-  const numLine = afterSources.split(/\n/)[0] ?? '';
-  const indices = numLine
-    .split(/[,;\s]+/)
-    .map((s) => parseInt(s.trim(), 10))
-    .filter((n) => Number.isFinite(n) && n >= 1 && n <= maxIndex);
-  const seen = new Set<number>();
-  return indices
-    .filter((n) => (seen.has(n) ? false : (seen.add(n), true)))
-    .slice(0, MAX_SOURCE_STORIES);
-}
-
-/**
- * Studio layout: ON AIR → SOURCES (indices) → SOCIAL (optional body).
- * Backward compatible: if markers missing, whole body before SOURCES = onAir only.
- */
-function parseStudioOutput(
-  raw: string,
-  maxIndex: number
-): { videoPrompt: string; onAir: string; indices: number[]; social: string } {
-  const srcPos = raw.indexOf(M_SOURCES);
-  let body = raw.trim();
-  let indices: number[] = [];
-
-  if (srcPos >= 0) {
-    body = raw.slice(0, srcPos).trim();
-    const after = raw.slice(srcPos + M_SOURCES.length).trim();
-    indices = parseSourceIndices(after, maxIndex);
-  }
-
-  let social = '';
-  const sm = raw.indexOf(M_SOCIAL);
-  if (sm >= 0) {
-    let tail = raw.slice(sm + M_SOCIAL.length).trim();
-    const nextMarker = tail.search(/\n<<</);
-    if (nextMarker >= 0) tail = tail.slice(0, nextMarker).trim();
-    social = tail
-      .split('\n')
-      .filter((l) => !l.trim().startsWith('<<<'))
-      .join('\n')
-      .trim()
-      .slice(0, 400);
-  }
-
-  const vp = body.indexOf(M_VIDEO);
-  const oa = body.indexOf(M_ONAIR);
-
-  if (vp >= 0 && oa > vp) {
-    const videoPrompt = body.slice(vp + M_VIDEO.length, oa).trim();
-    const onAir = body.slice(oa + M_ONAIR.length).trim();
-    return { videoPrompt, onAir, indices, social };
-  }
-  if (oa >= 0) {
-    const onAir = body.slice(oa + M_ONAIR.length).trim();
-    return { videoPrompt: '', onAir, indices, social };
-  }
-
-  return { videoPrompt: '', onAir: body, indices, social };
-}
 
 /** Gemini free tier often returns 429 with "Please retry in Xs" — parse that for backoff. */
 function parseGeminiRetrySeconds(message: string): number | null {
@@ -1161,7 +1003,7 @@ ${localColorBlock}
 (Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`2,5,7,9,11\` = story **2**, then **5**, then **7**, then **9**, then **11**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
 
 <<<SOCIAL>>>
-(**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**, 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler. **Write in sentence case** (normal Facebook / Instagram style): capitalize the first word and proper nouns only. **Do not** use ALL CAPS, title case for the whole paragraph, or fake emphasis — platforms flag shouty text as low quality. Standard tech spellings are fine (OpenAI, iPhone, GPU). No “link in bio,” no explaining screenshots. Threads-length.)
+(**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**. Write **properly**: clean grammar, real sentences (no fragments), correct capitalization (no random lowercase “i”), and normal punctuation. **Write in sentence case** (normal Facebook / Instagram style): capitalize the first word and proper nouns only. **Do not** use ALL CAPS, title case for the whole paragraph, or fake emphasis — platforms flag shouty text as low quality. Standard tech spellings are fine (OpenAI, iPhone, GPU). No “link in bio,” no explaining screenshots. 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler.)
 `;
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -1466,7 +1308,7 @@ ${localColorBlock}
     }
     if (shotFails.length) {
       const failLines = shotFails
-        .map((f) => `#${f.storyIndex} ${f.link} — ${f.error}`)
+        .map((f: { storyIndex: number; link: string; error: string }) => `#${f.storyIndex} ${f.link} — ${f.error}`)
         .join('\n');
       console.warn('Screenshot failures:\n' + failLines);
       screenshotBannerText +=
