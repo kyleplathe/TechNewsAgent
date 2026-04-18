@@ -386,6 +386,25 @@ function countOnAirWords(onAir: string): number {
     .filter(Boolean).length;
 }
 
+/** Matches Timberwolves / Wolves on air — must align with [LOCAL] in <<<SOURCES>>>. */
+const ON_AIR_WOLVES_RE =
+  /\b(timberwolves|\bwolves\b|minnesota\s+timberwolves)\b/i;
+
+/**
+ * Skate beat on air: say "skate" / "Thrasher" / etc. — models sometimes name the outlet without "skate".
+ * Must align with [SKATE] in <<<SOURCES>>>.
+ */
+const ON_AIR_SKATE_RE =
+  /\b(skate|skateboard|skateboarding|skaters?|thrasher)\b/i;
+
+function onAirReferencesWolvesBeat(onAir: string): boolean {
+  return ON_AIR_WOLVES_RE.test(onAir);
+}
+
+function onAirReferencesSkateBeat(onAir: string): boolean {
+  return ON_AIR_SKATE_RE.test(onAir);
+}
+
 /**
  * Culture/sports must not sit between core beats — avoids "Wolves/skate, then more tech" in the VO.
  * Single culture: first or last in <<<SOURCES>>>. Rare Wolves+skate: [LOCAL] first, [SKATE] last.
@@ -468,12 +487,24 @@ function validateStudioOutput(
       'When a fresh skate story exists, include one SKATE story in SOURCES.'
     );
   }
-  // Keep ON AIR mentions aligned with chosen source sections.
-  if (!hasWolvesSelected && /\b(timberwolves|wolves)\b/i.test(onAir)) {
+  // Bidirectional section lock: SOURCES ↔ ON AIR (avoid Wolves URL with no VO line, or VO skate with no URL).
+  if (!hasWolvesSelected && onAirReferencesWolvesBeat(onAir)) {
     issues.push('ON AIR mentions Wolves but SOURCES does not include a LOCAL story.');
   }
-  if (!hasSkateSelected && /\b(skate|skateboard|skateboarding)\b/i.test(onAir)) {
-    issues.push('ON AIR mentions skate but SOURCES does not include a SKATE story.');
+  if (!hasSkateSelected && onAirReferencesSkateBeat(onAir)) {
+    issues.push(
+      'ON AIR covers a skate beat but SOURCES does not include a SKATE story — add that number or remove the skate copy.'
+    );
+  }
+  if (hasWolvesSelected && !onAirReferencesWolvesBeat(onAir)) {
+    issues.push(
+      'SOURCES includes [LOCAL] (Timberwolves) but ON AIR does not mention Wolves — cover that pick or replace it in <<<SOURCES>>>.'
+    );
+  }
+  if (hasSkateSelected && !onAirReferencesSkateBeat(onAir)) {
+    issues.push(
+      'SOURCES includes [SKATE] but ON AIR does not cover the skate beat — mention skateboarding or the headline (e.g. Thrasher), or drop [SKATE] from <<<SOURCES>>>.'
+    );
   }
   if (/\blake street\b/i.test(onAir)) {
     issues.push('ON AIR must not mention Lake Street.');
@@ -1054,7 +1085,7 @@ ${storyPickRule}
 - **No celebrity gossip, city politics, or general government news** unless the headline is clearly **tech-related** (e.g. regulation of chips, AI, broadband).
 - **Wolves / LOCAL** — **Canis Hoopus (RSS)** plus **NBA.com Timberwolves** index (same **[LOCAL]** list). Use the basketball beat **only** when the item is **fresh**; if nothing qualifies, **skip Wolves** entirely.
 - Skateboarding: use **[SKATE]** for one quick, legit beat (premiere, contest, real news). Skip if nothing’s good.
-- **Section/source lock:** Do **not** mention Wolves unless a **[LOCAL]** story number is in **<<<SOURCES>>>**. Do **not** mention skate unless a **[SKATE]** number is in **<<<SOURCES>>>**.
+- **Section/source lock (bidirectional):** **[LOCAL]** in **<<<SOURCES>>>** ↔ you **must** mention Timberwolves / **Wolves** on air for that beat. **[SKATE]** in **<<<SOURCES>>>** ↔ you **must** cover that skate story on air (say **skate/skateboarding** or the outlet, e.g. **Thrasher**). Do **not** list a Wolves URL if you did not speak Wolves; do **not** speak a skate beat without a **[SKATE]** number in **<<<SOURCES>>>**.
 - **Length (non-negotiable):** One vertical take **~90 seconds** — treat **~85s as a soft floor** and **~95s as a hard ceiling** at a calm read. **Budget ~175–215 spoken words** between the fixed START line and the fixed END lines (ALL CAPS reads a little slow — stay lean). **If you are over budget, cut beats** before you cut the **${localBizName}** close.
 - **No extra headlines:** In **ON AIR**, cover **only** the stories whose numbers you list in **<<<SOURCES>>>**. No bonus or side mentions outside those ${TARGET_SOURCE_STORIES} picks.
 - **Tight but not thin:** On **main** beats only, add **one concrete detail** when the headline gives you something real (a number, vendor, mechanism) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
