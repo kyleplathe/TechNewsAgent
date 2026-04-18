@@ -352,12 +352,93 @@ function countApproxNewsBeats(onAir: string): number {
   return Math.max(paragraphBlocks, Math.ceil(sentenceCount / 2));
 }
 
+/**
+ * Gemini sometimes pastes the same story block twice (two paragraphs, identical copy).
+ * That burns VO time and leaves one <<<SOURCES>>> row without a real beat.
+ */
+function hasAdjacentDuplicateNewsParagraphs(onAir: string): boolean {
+  const body = onAir
+    .replace(
+      /^LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE\. AND WE'VE GOT A LOT HITTING THE SHOP TODAY\./i,
+      ''
+    )
+    .replace(/BACK TO THE SOLDERING IRON\.[\s\S]*$/i, '')
+    .trim();
+  if (!body) return false;
+  const blocks = body
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  for (let i = 1; i < blocks.length; i++) {
+    const a = normalizeText(blocks[i - 1] ?? '');
+    const b = normalizeText(blocks[i] ?? '');
+    if (a.length < 40 || b.length < 40) continue;
+    if (a === b) return true;
+  }
+  return false;
+}
+
 function countOnAirWords(onAir: string): number {
   return onAir
     .replace(/\r\n/g, '\n')
     .trim()
     .split(/\s+/)
     .filter(Boolean).length;
+}
+
+/**
+ * Culture/sports must not sit between core beats — avoids "Wolves/skate, then more tech" in the VO.
+ * Single culture: first or last in <<<SOURCES>>>. Rare Wolves+skate: [LOCAL] first, [SKATE] last.
+ */
+function validateCultureBeatPlacement(selectedStories: Collected[]): string[] {
+  const issues: string[] = [];
+  if (selectedStories.length !== TARGET_SOURCE_STORIES) return issues;
+
+  const positions = selectedStories
+    .map((s, i) =>
+      s.section === 'LOCAL' || s.section === 'SKATE' ? i : -1
+    )
+    .filter((i) => i >= 0);
+
+  if (positions.length === 0) return issues;
+
+  if (positions.length > 2) {
+    issues.push(
+      'Too many [LOCAL]/[SKATE] picks in SOURCES — keep to one culture beat, or at most Wolves plus skate when the prompt allows both.'
+    );
+    return issues;
+  }
+
+  const last = selectedStories.length - 1;
+
+  if (positions.length === 1) {
+    const c = positions[0]!;
+    if (c !== 0 && c !== last) {
+      issues.push(
+        'Culture/sports ([LOCAL] or [SKATE]) must be **first or last** in <<<SOURCES>>> / ON AIR order — never between tech/repair beats.'
+      );
+    }
+    return issues;
+  }
+
+  const [a, b] = [positions[0]!, positions[1]!].sort((x, y) => x - y);
+  if (a !== 0 || b !== last) {
+    issues.push(
+      'With both Wolves and skate, [LOCAL] must be first and [SKATE] last in <<<SOURCES>>> / ON AIR — core beats only in the middle.'
+    );
+    return issues;
+  }
+  const head = selectedStories[0];
+  const tail = selectedStories[last];
+  if (
+    head?.section !== 'LOCAL' ||
+    tail?.section !== 'SKATE'
+  ) {
+    issues.push(
+      'When using both Wolves and skate: story **1** must be [LOCAL], story **5** must be [SKATE].'
+    );
+  }
+  return issues;
 }
 
 function validateStudioOutput(
@@ -415,6 +496,7 @@ function validateStudioOutput(
   if (words > 235) {
     issues.push(`ON AIR is too long (${words} words); trim to ~175-215 words.`);
   }
+  issues.push(...validateCultureBeatPlacement(selectedStories));
   return issues;
 }
 
@@ -535,7 +617,8 @@ function toOrderedUniqueSourceIndices(indices: number[], maxIndex: number): numb
 const DEFAULT_MAX_STORY_AGE_HOURS: Record<Collected['section'], number> = {
   LOCAL: 18,
   REPAIR: 18,
-  SKATE: 18,
+  /** Skate sites often post a few times a week — 18h drops the whole lane most mornings. */
+  SKATE: 72,
   TECH: 18,
   HARDWARE: 18,
 };
@@ -741,13 +824,13 @@ async function runNewsAgent() {
   const skateFeeds = [
     // Thrasher RSS (official help page lists feeds; this one is widely referenced)
     'https://www.thrashermagazine.com/?format=feed&type=rss',
-    // WordPress defaults (may change; parser will warn if broken)
+    // WordPress (may change; parser will warn if broken)
     'https://www.jenkemmag.com/feed/',
-    'https://quartersnacks.com/feed/',
+    // Quartersnacks /feed/ 301s to HTML — no usable RSS; replaced with working feeds:
+    'https://www.freeskatemag.com/feed/',
+    'https://www.skateboarding.com/feed',
     // Substack feed
     'https://villagepsychic.substack.com/feed',
-    // Best-effort (may be blocked/changed)
-    'https://theberrics.com/feed',
   ];
   /**
    * Local = Wolves: Canis Hoopus Atom feed (Timberwolves + occasional Lynx; fan perspective).
@@ -913,7 +996,7 @@ async function runNewsAgent() {
 - **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first** (publish time). When several headlines are similarly strong, prefer the **newer** item.
 - **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~90s**.
 - ${cultureRule}
-- **Hard slot rule (sports/culture):** The 5th beat should be **SKATE first**, with **Wolves fallback** only when skate has no fresh candidate.
+- **Hard slot rule (sports/culture):** Prefer **SKATE** for the culture pick when a fresh skate item exists; otherwise use a fresh **Wolves** beat. **Never** place the culture beat **between** tech/repair stories — it must be **first or last** in your rundown (last is default; first only if you **open** with Wolves/skate).
 - **Fallback sports cue:** If skate is unavailable, use one fresh **Wolves** beat; if both are unavailable, keep the 4 core beats and close.
 - **Hardware** only when it clearly earns it; never force a gadget beat.`;
 
@@ -949,12 +1032,12 @@ async function runNewsAgent() {
     ? `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with the strongest **TECH**/**HARDWARE** headline.
 2) **TECH block** — **1–2** beats from **[TECH]** + **[HARDWARE]** (software, AI, hardware, gaming industry, **Bitcoin** when the headline is Bitcoin-specific) — **freshest and most newsworthy**, not “cover everything.”
-3) **OPTIONAL: WOLVES then SKATE** — if you include sports, cover a fresh **Wolves** beat from **[LOCAL]** (Canis Hoopus + **NBA.com** index) **before** any **[SKATE]** line. **Prefer at most one** of Wolves or skate; only use **both** if Wolves comes **first**, each is **one short sentence**, and you stay under the ON AIR word budget; otherwise skip to close.
+3) **ONE culture/sports beat** — either **one [LOCAL] Wolves** and/or **one [SKATE]** (see culture rules above). **Do not** put this beat **between** tech/repair stories: it goes **last** before the close (usual) or **first** if you open with sports — **never** tech → culture → tech.
 4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`
     : `**SEGMENT ORDER (same in both columns — do not reorder):**
 1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with the strongest **TECH**/**HARDWARE** headline.
 2) **TECH block** — **1–2** beats from **[TECH]** + **[HARDWARE]** (software, AI, hardware, gaming industry, **Bitcoin** when the headline is Bitcoin-specific) — **freshest and most newsworthy**, not “cover everything.”
-3) **OPTIONAL: SKATE** — one quick **[SKATE]** beat only if it’s legit; otherwise skip to close.
+3) **OPTIONAL: SKATE** — one quick **[SKATE]** beat only if it’s legit — **last** news beat before the close (or **first** if you open with it), never sandwiched between tech beats; otherwise skip to close.
 4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`;
 
   const prompt = `
@@ -1000,7 +1083,7 @@ ${localColorBlock}
 (ALL CAPS — one take, **~90s** with **~175–215 words** between START and END; same order as SOURCES; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
 
 <<<SOURCES>>>
-(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`2,5,7,9,11\` = story **2**, then **5**, then **7**, then **9**, then **11**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Never** put **[LOCAL]** / Wolves first in this line just because it’s a different feed — if Wolves is the **last** news beat before the neighborhood close, its number must be **last** among the indices you list (unless you genuinely **open** ON AIR with Wolves).)
+(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`2,5,7,9,11\` = story **2**, then **5**, then **7**, then **9**, then **11**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **[LOCAL]** / **[SKATE]** must be **first or last** in this comma list (last = usual, before the neighborhood close; first = only if you **open** with that beat). **Never** place culture/sports **between** two tech/repair picks — no tech after your Wolves/skate beat except the close.)
 
 <<<SOCIAL>>>
 (**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**. Write **properly**: clean grammar, real sentences (no fragments), correct capitalization (no random lowercase “i”), and normal punctuation. **Write in sentence case** (normal Facebook / Instagram style): capitalize the first word and proper nouns only. **Do not** use ALL CAPS, title case for the whole paragraph, or fake emphasis — platforms flag shouty text as low quality. Standard tech spellings are fine (OpenAI, iPhone, GPU). No “link in bio,” no explaining screenshots. 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler.)
@@ -1117,10 +1200,17 @@ ${localColorBlock}
     rawOut = await generateWithBackoff(requestText);
     const parsed = parseStudioOutput(rawOut, collected.length);
     fixedOnAir = parsed.onAir.trim();
+    const uniqParsed = toOrderedUniqueSourceIndices(
+      parsed.indices,
+      collected.length
+    );
     indices = enforceSourceSectionCaps(
-      toOrderedUniqueSourceIndices(parsed.indices, collected.length),
+      uniqParsed,
       collected,
       TARGET_SOURCE_STORIES
+    );
+    const programmaticSourceFillIns = indices.filter(
+      (i) => !uniqParsed.includes(i)
     );
     modelSocial = parsed.social;
     onAirForEmail = ensureLocalBusinessInOnAir(fixedOnAir, localBizName);
@@ -1134,6 +1224,16 @@ ${localColorBlock}
       selectedStories,
       hasSkate
     );
+    if (programmaticSourceFillIns.length) {
+      validationIssues.push(
+        `<<<SOURCES>>> required programmatic fill-in for story number(s) ${programmaticSourceFillIns.join(', ')} — emit exactly ${TARGET_SOURCE_STORIES} distinct valid indices (at most one [LOCAL] Timberwolves pick; no duplicate numbers).`
+      );
+    }
+    if (hasAdjacentDuplicateNewsParagraphs(fixedOnAir)) {
+      validationIssues.push(
+        'ON AIR has two consecutive duplicate story paragraphs — remove the repeated block; each of the five beats must cover a different story.'
+      );
+    }
     if (!validationIssues.length) break;
     if (pass <= maxValidationRetries) {
       console.warn(

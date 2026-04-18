@@ -20,7 +20,7 @@ Default max age (overridable per section):
 | TECH     | 18            | `MAX_STORY_AGE_HOURS_TECH`       |
 | REPAIR   | 18            | `MAX_STORY_AGE_HOURS_REPAIR`     |
 | HARDWARE | 18            | `MAX_STORY_AGE_HOURS_HARDWARE`   |
-| SKATE    | 18            | `MAX_STORY_AGE_HOURS_SKATE`      |
+| SKATE    | 72            | `MAX_STORY_AGE_HOURS_SKATE`      |
 | LOCAL    | 18            | `MAX_STORY_AGE_HOURS_LOCAL`      |
 
 Items **without a parseable `pubDate` / Atom date** are **dropped** unless `ALLOW_UNDATED_FEED_ITEMS=1` (escape hatch for broken feeds).
