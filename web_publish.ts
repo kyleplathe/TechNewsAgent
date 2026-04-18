@@ -95,7 +95,16 @@ export type TechNewsWebPayload = {
   videoPrompt: string;
   onAirPlain: string;
   stories: Array<{
+    /**
+     * Row number in the **daily feed pool** (same as Gemini’s numbered list / screenshot `NN-*.jpg`).
+     * **Not** on-air order — use `segmentOrder` (or array order) for VO / slide sequence.
+     */
     storyIndex: number;
+    /**
+     * **1-based position in this episode** (`<<<SOURCES>>>` / teleprompter order). Sort the UI by this
+     * (or by JSON array order), **not** by `storyIndex`.
+     */
+    segmentOrder: number;
     section: string;
     title: string;
     link: string;
@@ -474,8 +483,8 @@ export async function writeTechNewsWebBundle(
   const blogOrder = blogStoryOrderMode();
   const storiesOrdered = sortStoriesForBlogOrder(stories, blogOrder);
   if (blogOrder === 'newest' && stories.length > 1) {
-    console.log(
-      `WEB: blog story order = script (set TECHNEWS_BLOG_STORY_ORDER=script for <<<SOURCES>>> order)`
+    console.warn(
+      'WEB: TECHNEWS_BLOG_STORY_ORDER=newest — rows sorted by RSS pub date (often misaligns with the teleprompter). Unset or set TECHNEWS_BLOG_STORY_ORDER=script for <<<SOURCES>>> / VO order.'
     );
   }
 
@@ -508,6 +517,7 @@ export async function writeTechNewsWebBundle(
 
   type BuiltRow = {
     storyIndex: number;
+    segmentOrder: number;
     section: string;
     title: string;
     link: string;
@@ -523,6 +533,7 @@ export async function writeTechNewsWebBundle(
     const sec = sections[i];
     built.push({
       storyIndex: s.storyIndex,
+      segmentOrder: i + 1,
       section: s.section,
       title: decodeHtmlEntities(s.title),
       link: s.link,
@@ -617,6 +628,7 @@ export async function writeTechNewsWebBundle(
       );
       const row: TechNewsWebPayload['stories'][number] = {
         storyIndex: b.storyIndex,
+        segmentOrder: b.segmentOrder,
         section: b.section,
         title: b.title,
         link: b.link,
@@ -633,6 +645,7 @@ export async function writeTechNewsWebBundle(
     if (localSpotlightGeneric) {
       payloadStories.push({
         storyIndex: 99,
+        segmentOrder: built.length + 1,
         section: 'Local Spotlight',
         title: localSpotlightGeneric.businessName,
         link: localSpotlightGeneric.websiteUrl,
@@ -727,6 +740,7 @@ export async function writeTechNewsWebBundle(
       );
       const row: TechNewsWebPayload['stories'][number] = {
         storyIndex: b.storyIndex,
+        segmentOrder: b.segmentOrder,
         section: b.section,
         title: b.title,
         link: b.link,
@@ -743,6 +757,7 @@ export async function writeTechNewsWebBundle(
     if (localSpotlightInstakyle) {
       postStories.push({
         storyIndex: 99,
+        segmentOrder: built.length + 1,
         section: 'Local Spotlight',
         title: localSpotlightInstakyle.businessName,
         link: localSpotlightInstakyle.websiteUrl,

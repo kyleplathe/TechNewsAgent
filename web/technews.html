@@ -183,7 +183,13 @@
             var art = document.createElement('article');
             var meta = document.createElement('div');
             meta.className = 'meta';
-            meta.textContent = '[' + s.section + '] · story #' + s.storyIndex;
+            meta.textContent =
+              '[' +
+              s.section +
+              '] · ' +
+              (s.segmentOrder != null
+                ? 'beat ' + s.segmentOrder + ' (feed #' + s.storyIndex + ')'
+                : 'story #' + s.storyIndex);
             art.appendChild(meta);
             var h2 = document.createElement('h2');
             h2.textContent = s.studioHeadline || s.title || 'Story';

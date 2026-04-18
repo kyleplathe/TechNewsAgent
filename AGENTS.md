@@ -33,7 +33,7 @@ Markers in model output: `<<<ON_AIR>>>`, `<<<SOURCES>>>` (one line of comma-sepa
 
 **SOURCE LINKS / email JPEG order (default):** indices follow the model’s **`<<<SOURCES>>>`** line (same order as slide / VO beats). Set **`USE_ON_AIR_SOURCE_REORDER=1`** to re-sort by hostname/title hits in **`<<<ON_AIR>>>`** (legacy heuristic).
 
-**Blog / Instakyle story rows (default):** **`TECHNEWS_BLOG_STORY_ORDER=script`** — stories follow email / `<<<SOURCES>>>` order (keeps `VIDEO PROMPT` story blocks aligned 1:1). Set **`TECHNEWS_BLOG_STORY_ORDER=newest`** for newest-first by feed date.
+**Blog / Instakyle story rows (default):** **`TECHNEWS_BLOG_STORY_ORDER=script`** — stories follow email / `<<<SOURCES>>>` order (keeps `VIDEO PROMPT` story blocks aligned 1:1). Set **`TECHNEWS_BLOG_STORY_ORDER=newest`** for newest-first by feed date (can reorder vs. the teleprompter — e.g. Wolves URL jumping to the top). Post JSON includes **`segmentOrder`** (1-based VO position) and **`storyIndex`** (daily feed pool # for screenshots); **sort the UI by `segmentOrder` or JSON array order, not by `storyIndex`.**
 
 Post JSON includes **`seoKeywords`** (neighborhood + business + story tokens) and optional **`localSpotlight`** (**Local Spotlight** — business URL + screenshot) when `LOCAL_BIZ_WEBSITE` or the rotation entry has a **`website`** URL.
 
