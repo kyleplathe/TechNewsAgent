@@ -1294,10 +1294,24 @@ ${localColorBlock}
       ? reorderIndicesToMatchOnAir(indices, collected, fixedOnAir)
       : indices;
 
-  const used = orderedIndices
-    .map((i) => collected[i - 1])
-    .filter(Boolean)
-    .filter((c) => c.link);
+  /**
+   * Keep **`storyIndex`** aligned with each row. The old pattern
+   * `.map(...).filter(Boolean).filter(c => c.link)` dropped items and broke
+   * `orderedIndices[j]` pairing — screenshots (keyed by `storyIndex`) could attach
+   * to the wrong headline on the blog.
+   */
+  const usedWithStoryIndex: Array<{ storyIndex: number; row: Collected }> = [];
+  for (const i of orderedIndices) {
+    const c = collected[i - 1];
+    if (!c?.link?.trim()) {
+      console.warn(
+        `Source #${i} omitted from link list — missing or empty URL (check feed item).`
+      );
+      continue;
+    }
+    usedWithStoryIndex.push({ storyIndex: i, row: c });
+  }
+  const used = usedWithStoryIndex.map((u) => u.row);
 
   const socialHeadline = formatSocialHeadline();
   let socialBody = normalizeSocialBodySentenceCase(
@@ -1603,7 +1617,7 @@ ${localColorBlock}
     `<div style="font-family:system-ui,sans-serif;max-width:760px;color:#111">` +
     tickerHtml +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(onAirHeader)}</p>` +
-    `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd">${escapeHtml(onAirForEmail.trim())}</pre>` +
+    `<pre style="white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.5em;padding:12px;background:#fff;border-radius:8px;border:1px solid #ddd;user-select:all;-webkit-user-select:all">${escapeHtml(onAirForEmail.trim())}</pre>` +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(socialHeader)}</p>` +
     socialCaptionHtml +
     `<p style="font-size:12px;font-weight:700;letter-spacing:0.04em;color:#444;margin:0 0 0.5em">${escapeHtml(ytVerifyHeader)}</p>` +
@@ -1706,16 +1720,25 @@ ${localColorBlock}
     const { writeTechNewsWebBundle } = await import('./web_publish');
     const bizForSeo: LocalBusiness = { ...pickedBiz, name: localBizName };
     const seoKeywords = buildSeoKeywords(bizForSeo, used);
-    const webStories = used.map((c, j) => {
-      const storyIndex = orderedIndices[j]!;
+    const webStories = usedWithStoryIndex.map(({ storyIndex, row: c }) => {
       const shot = screenshotKept.find((k) => k.storyIndex === storyIndex);
+      const imageFilename = shot?.filename;
+      if (imageFilename) {
+        const m = imageFilename.match(/^(\d{1,3})-/);
+        const prefix = m ? Number(m[1]) : NaN;
+        if (Number.isFinite(prefix) && prefix !== storyIndex) {
+          console.warn(
+            `WEB: JPEG prefix ${prefix} ≠ storyIndex ${storyIndex} (${c.title.slice(0, 48)}…) — check pairing.`
+          );
+        }
+      }
       return {
         storyIndex,
         section: mapSectionForBlog(c.section),
         title: c.title,
         link: c.link,
         publishedAt: c.date,
-        imageFilename: shot?.filename,
+        imageFilename,
         imageBuffer: shot?.content,
       };
     });
