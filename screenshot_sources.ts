@@ -76,15 +76,64 @@ function fullPage(): boolean {
 }
 
 /**
+ * `reader` tries to mimic a clean article-reader look by hiding nav/ads/chrome,
+ * then falls through to content clipping.
+ *
  * Default **viewport** = one mobile **full frame** (393×852 CSS px with default width/height) —
  * matches a normal phone screenshot (nav + headline + body fold), consistent JPEG size.
  * `content` = crop to article/main up to `SCREENSHOT_MAX_CONTENT_HEIGHT`. `fullpage` = whole document.
  */
-function screenshotMode(): 'viewport' | 'content' | 'fullpage' {
+function screenshotMode(): 'viewport' | 'content' | 'fullpage' | 'reader' {
   const m = (process.env.SCREENSHOT_MODE ?? 'viewport').trim().toLowerCase();
   if (m === 'viewport') return 'viewport';
   if (m === 'fullpage' || m === 'full_page') return 'fullpage';
+  if (m === 'reader' || m === 'readerview' || m === 'reader_view') return 'reader';
   return 'content';
+}
+
+async function applyReaderStyle(page: Page): Promise<void> {
+  await page
+    .evaluate(() => {
+      for (const sel of [
+        'header',
+        'nav',
+        'aside',
+        'footer',
+        '[role="navigation"]',
+        '[aria-label*="advert"]',
+        '[class*="ad-"]',
+        '[class*="advert"]',
+        '[id*="ad-"]',
+        '[id*="advert"]',
+        '.newsletter',
+        '.subscribe',
+        '.paywall',
+      ]) {
+        for (const el of document.querySelectorAll(sel)) {
+          if (!(el instanceof HTMLElement)) continue;
+          el.style.setProperty('display', 'none', 'important');
+        }
+      }
+    })
+    .catch(() => {});
+
+  await page
+    .addStyleTag({
+      content: `
+        body {
+          background: #ffffff !important;
+          color: #111111 !important;
+        }
+        article, main [role="main"], .article-body, .entry-content, .post-content {
+          max-width: 760px !important;
+          margin-left: auto !important;
+          margin-right: auto !important;
+          padding-left: 16px !important;
+          padding-right: 16px !important;
+        }
+      `,
+    })
+    .catch(() => {});
 }
 
 function maxContentHeightPx(): number {
@@ -499,6 +548,9 @@ async function captureScreenshot(page: Page): Promise<Buffer> {
     return Buffer.from(
       await page.screenshot({ type: 'jpeg', quality: jq, fullPage: false })
     );
+  }
+  if (mode === 'reader') {
+    await applyReaderStyle(page);
   }
   if (mode === 'fullpage') {
     return Buffer.from(

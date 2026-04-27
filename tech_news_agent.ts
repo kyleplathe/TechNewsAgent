@@ -465,7 +465,7 @@ function validateStudioOutput(
   indices: number[],
   localBizName: string,
   selectedStories: Collected[],
-  hasFreshSkateCandidate: boolean
+  shouldRequireSkateBeat: boolean
 ): string[] {
   const issues: string[] = [];
   const sourceCount = indices.length;
@@ -482,9 +482,9 @@ function validateStudioOutput(
   }
   const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
   const hasSkateSelected = selectedStories.some((s) => s.section === 'SKATE');
-  if (hasFreshSkateCandidate && !hasSkateSelected) {
+  if (shouldRequireSkateBeat && !hasSkateSelected) {
     issues.push(
-      'When a fresh skate story exists, include one SKATE story in SOURCES.'
+      'Skate cadence rule: include one SKATE story in SOURCES this run.'
     );
   }
   // Bidirectional section lock: SOURCES ↔ ON AIR (avoid Wolves URL with no VO line, or VO skate with no URL).
@@ -524,8 +524,11 @@ function validateStudioOutput(
     );
   }
   const words = countOnAirWords(onAir);
-  if (words > 235) {
-    issues.push(`ON AIR is too long (${words} words); trim to ~175-215 words.`);
+  if (words > 205) {
+    issues.push(`ON AIR is too long (${words} words); trim to ~150-195 words for an ~80-90s read.`);
+  }
+  if (words < 140) {
+    issues.push(`ON AIR is too short (${words} words); expand to ~150-195 words for an ~80-90s read.`);
   }
   issues.push(...validateCultureBeatPlacement(selectedStories));
   return issues;
@@ -593,6 +596,74 @@ function enforceSourceSectionCaps(
   }
 
   return keep;
+}
+
+/**
+ * Ensure every selected source has a usable URL so beat count stays aligned
+ * with SOURCE LINKS / screenshot attachments.
+ */
+function enforceSourcesHaveLinks(
+  indices: number[],
+  collected: Collected[],
+  targetCount: number
+): number[] {
+  const withLinks = indices.filter((idx) => {
+    const c = collected[idx - 1];
+    return !!c?.link?.trim();
+  });
+  return enforceSourceSectionCaps(withLinks, collected, targetCount);
+}
+
+function weeklySkateCadenceDays(): number {
+  return Math.min(
+    14,
+    Math.max(1, parseInt(process.env.WEEKLY_SKATE_CADENCE_DAYS ?? '7', 10) || 7)
+  );
+}
+
+function hasRecentSkateBeat(
+  recentLog: AirLogEntry[],
+  nowMs: number,
+  windowDays: number
+): boolean {
+  const windowMs = windowDays * 24 * 60 * 60 * 1000;
+  return recentLog.some((e) => {
+    if (e.section !== 'SKATE') return false;
+    const d = parseDateSafe(e.airedAt);
+    return d ? nowMs - d.getTime() <= windowMs : false;
+  });
+}
+
+/**
+ * Weekly cadence guardrail: if skate is due and we have a valid skate candidate,
+ * ensure one SKATE story is present in SOURCES.
+ */
+function enforceWeeklySkateCadence(
+  indices: number[],
+  collected: Collected[],
+  targetCount: number,
+  shouldRequireSkateBeat: boolean
+): number[] {
+  if (!shouldRequireSkateBeat) return indices;
+  if (indices.some((idx) => collected[idx - 1]?.section === 'SKATE')) return indices;
+
+  const selected = new Set(indices);
+  let skateIdx = -1;
+  for (let i = 1; i <= collected.length; i++) {
+    if (selected.has(i)) continue;
+    const c = collected[i - 1];
+    if (!c?.link?.trim()) continue;
+    if (c.section !== 'SKATE') continue;
+    skateIdx = i;
+    break;
+  }
+  if (skateIdx < 0) return indices;
+
+  const out = [...indices];
+  let replaceAt = out.findIndex((idx) => collected[idx - 1]?.section === 'LOCAL');
+  if (replaceAt < 0) replaceAt = out.length - 1;
+  if (replaceAt >= 0) out[replaceAt] = skateIdx;
+  return enforceSourceSectionCaps(out, collected, targetCount);
 }
 
 function productKey(title: string): string {
@@ -862,6 +933,8 @@ async function runNewsAgent() {
     'https://www.skateboarding.com/feed',
     // Substack feed
     'https://villagepsychic.substack.com/feed',
+    // The Berrics
+    'https://theberrics.com/feed/',
   ];
   /**
    * Local = Wolves: Canis Hoopus Atom feed (Timberwolves + occasional Lynx; fan perspective).
@@ -986,6 +1059,8 @@ async function runNewsAgent() {
     const d = parseDateSafe(e.airedAt);
     return d ? now - d.getTime() <= 30 * 24 * 60 * 60 * 1000 : false;
   });
+  const skateCadenceDays = weeklySkateCadenceDays();
+  const skateBeatRecentlyAired = hasRecentSkateBeat(recentLog, now, skateCadenceDays);
 
   collected = collected.filter((c) => {
     const fp = titleFingerprint(c.title);
@@ -1014,25 +1089,29 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
+  const hasWolves = collected.some((c) => c.section === 'LOCAL');
+  const hasSkate = collected.some((c) => c.section === 'SKATE');
+  const shouldRequireSkateBeat =
+    cultureMode !== 'LOCAL' && hasSkate && !skateBeatRecentlyAired;
+
   const cultureRule =
     cultureMode === 'SKATE'
       ? '- **Culture slot (forced):** Include **one [SKATE]** beat (when any skate item exists). **Do not** include **[LOCAL]** Timberwolves on this run.'
       : cultureMode === 'LOCAL'
         ? '- **Culture slot (forced):** Include **one [LOCAL]** Timberwolves beat (when any Wolves item exists). **Do not** include **[SKATE]** on this run.'
-        : '- **Culture / sports slot:** Keep this as **one beat**. Use **[SKATE]** when a fresh skate item exists; if not, use a fresh **Wolves** (**[LOCAL]**) beat.';
+        : shouldRequireSkateBeat
+          ? `- **Culture / sports slot (weekly cadence):** Include **one [SKATE]** beat this run (no skate aired in the last ${skateCadenceDays} days).`
+          : '- **Culture / sports slot:** Keep this as **one beat**. Use **[SKATE]** when a fresh skate item exists; if not, use a fresh **Wolves** (**[LOCAL]**) beat.';
 
   const storyPickRule = `- **<<<SOURCES>>> length = slide count:** Pick **exactly ${TARGET_SOURCE_STORIES} story numbers** total (**never ${TARGET_SOURCE_STORIES + 1}+**).
 - **Lineup shape (default):** Build **${CORE_SOURCE_STORIES} core beats** (REPAIR/TECH/HARDWARE) **plus ${CULTURE_SOURCE_STORIES} culture/sports beat** (**[LOCAL]** Timberwolves or **[SKATE]**), then do the neighborhood close.
 - **One Wolves item max:** You may include **at most one [LOCAL] Timberwolves** story number in **<<<SOURCES>>>**. Never pick two Wolves items in the same episode.
 - **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first** (publish time). When several headlines are similarly strong, prefer the **newer** item.
-- **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~90s**.
+- **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~80-90s**.
 - ${cultureRule}
 - **Hard slot rule (sports/culture):** Prefer **SKATE** for the culture pick when a fresh skate item exists; otherwise use a fresh **Wolves** beat. **Never** place the culture beat **between** tech/repair stories — it must be **first or last** in your rundown (last is default; first only if you **open** with Wolves/skate).
 - **Fallback sports cue:** If skate is unavailable, use one fresh **Wolves** beat; if both are unavailable, keep the 4 core beats and close.
 - **Hardware** only when it clearly earns it; never force a gadget beat.`;
-
-  const hasWolves = collected.some((c) => c.section === 'LOCAL');
-  const hasSkate = collected.some((c) => c.section === 'SKATE');
 
   const pickedBiz = pickLocalBusiness();
   const localBizName =
@@ -1086,11 +1165,11 @@ ${storyPickRule}
 - **Wolves / LOCAL** — **Canis Hoopus (RSS)** plus **NBA.com Timberwolves** index (same **[LOCAL]** list). Use the basketball beat **only** when the item is **fresh**; if nothing qualifies, **skip Wolves** entirely.
 - Skateboarding: use **[SKATE]** for one quick, legit beat (premiere, contest, real news). Skip if nothing’s good.
 - **Section/source lock (bidirectional):** **[LOCAL]** in **<<<SOURCES>>>** ↔ you **must** mention Timberwolves / **Wolves** on air for that beat. **[SKATE]** in **<<<SOURCES>>>** ↔ you **must** cover that skate story on air (say **skate/skateboarding** or the outlet, e.g. **Thrasher**). Do **not** list a Wolves URL if you did not speak Wolves; do **not** speak a skate beat without a **[SKATE]** number in **<<<SOURCES>>>**.
-- **Length (non-negotiable):** One vertical take **~90 seconds** — treat **~85s as a soft floor** and **~95s as a hard ceiling** at a calm read. **Budget ~175–215 spoken words** between the fixed START line and the fixed END lines (ALL CAPS reads a little slow — stay lean). **If you are over budget, cut beats** before you cut the **${localBizName}** close.
+- **Length (non-negotiable):** One vertical take **~80-90 seconds** — treat **~80s as a soft floor** and **~90s as a hard ceiling** at a calm read. **Budget ~150-195 spoken words** between the fixed START line and the fixed END lines (ALL CAPS reads a little slow — stay lean). **If you are over budget, cut beats** before you cut the **${localBizName}** close.
 - **No extra headlines:** In **ON AIR**, cover **only** the stories whose numbers you list in **<<<SOURCES>>>**. No bonus or side mentions outside those ${TARGET_SOURCE_STORIES} picks.
 - **Tight but not thin:** On **main** beats only, add **one concrete detail** when the headline gives you something real (a number, vendor, mechanism) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
 - **Banned hype / podcast clichés (ON AIR and social — never say or echo):** “hold on to your hat(s),” “buckle up,” “deep dive,” “let’s dive in,” “fire hose,” “grab your popcorn,” “you won’t believe,” “crazy,” “insane” (unless the headline literally uses it), or **any** “fasten your seatbelts” style padding. Sound like a colleague at the bench, not a trailer voice.
-- **Local business (every episode):** The ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block). That line is **not** filler — **include it** even on tight ~90s reads.
+- **Local business (every episode):** The ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block). That line is **not** filler — **include it** even on tight ~80-90s reads.
 
 You are writing for one **on-air column only** (teleprompter / VO).
 
@@ -1111,7 +1190,7 @@ ${localColorBlock}
 **OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
 
 <<<ON_AIR>>>
-(ALL CAPS — one take, **~90s** with **~175–215 words** between START and END; same order as SOURCES; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
+(ALL CAPS — one take, **~80-90s** with **~150-195 words** between START and END; same order as SOURCES; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
 
 <<<SOURCES>>>
 (Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`2,5,7,9,11\` = story **2**, then **5**, then **7**, then **9**, then **11**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **[LOCAL]** / **[SKATE]** must be **first or last** in this comma list (last = usual, before the neighborhood close; first = only if you **open** with that beat). **Never** place culture/sports **between** two tech/repair picks — no tech after your Wolves/skate beat except the close.)
@@ -1240,6 +1319,13 @@ ${localColorBlock}
       collected,
       TARGET_SOURCE_STORIES
     );
+    indices = enforceWeeklySkateCadence(
+      indices,
+      collected,
+      TARGET_SOURCE_STORIES,
+      shouldRequireSkateBeat
+    );
+    indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
     const programmaticSourceFillIns = indices.filter(
       (i) => !uniqParsed.includes(i)
     );
@@ -1253,11 +1339,11 @@ ${localColorBlock}
       indices,
       localBizName,
       selectedStories,
-      hasSkate
+      shouldRequireSkateBeat
     );
     if (programmaticSourceFillIns.length) {
       validationIssues.push(
-        `<<<SOURCES>>> required programmatic fill-in for story number(s) ${programmaticSourceFillIns.join(', ')} — emit exactly ${TARGET_SOURCE_STORIES} distinct valid indices (at most one [LOCAL] Timberwolves pick; no duplicate numbers).`
+        `<<<SOURCES>>> required programmatic fill-in for story number(s) ${programmaticSourceFillIns.join(', ')} — emit exactly ${TARGET_SOURCE_STORIES} distinct valid indices with real URLs (at most one [LOCAL] Timberwolves pick; no duplicate numbers).`
       );
     }
     if (hasAdjacentDuplicateNewsParagraphs(fixedOnAir)) {
@@ -1444,7 +1530,7 @@ ${localColorBlock}
         contentType: 'image/jpeg',
       }));
       const names = screenshotKept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS — ${screenshotKept.length} JPEG: ${names}\nDefault: **viewport** = full mobile frame (~393×852 CSS px at DPR 1 unless SCREENSHOT_WIDTH/HEIGHT set). Use SCREENSHOT_MODE=content for article-only crop. Order matches <<<SOURCES>>>. See AGENTS.md.\n`;
+      screenshotBannerText = `\nSOURCE SCREENSHOTS — ${screenshotKept.length} JPEG: ${names}\nDefault: **viewport** = full mobile frame (~393×852 CSS px at DPR 1 unless SCREENSHOT_WIDTH/HEIGHT set). Use SCREENSHOT_MODE=content for article-only crop, or SCREENSHOT_MODE=reader for cleaner reader-style article grabs. Order matches <<<SOURCES>>>. See AGENTS.md.\n`;
       screenshotBannerHtml =
         `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
         `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
