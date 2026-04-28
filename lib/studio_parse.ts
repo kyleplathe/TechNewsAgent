@@ -6,8 +6,7 @@ const M_SOCIAL = '<<<SOCIAL>>>';
 const MAX_SOURCE_STORIES = 5;
 
 function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
-  const numLine = afterSources.split(/\n/)[0] ?? '';
-  const indices = numLine
+  const indices = afterSources
     .split(/[,;\s]+/)
     .map((s) => parseInt(s.trim(), 10))
     .filter((n) => Number.isFinite(n) && n >= 1 && n <= maxIndex);
@@ -26,12 +25,15 @@ export function parseStudioOutput(
   maxIndex: number
 ): { videoPrompt: string; onAir: string; indices: number[]; social: string } {
   const srcPos = raw.indexOf(M_SOURCES);
+  const socialPos = raw.indexOf(M_SOCIAL);
   let body = raw.trim();
   let indices: number[] = [];
 
   if (srcPos >= 0) {
     body = raw.slice(0, srcPos).trim();
-    const after = raw.slice(srcPos + M_SOURCES.length).trim();
+    const afterStart = srcPos + M_SOURCES.length;
+    const afterEnd = socialPos >= 0 && socialPos > srcPos ? socialPos : raw.length;
+    const after = raw.slice(afterStart, afterEnd).trim();
     indices = parseSourceIndices(after, maxIndex);
   }
 

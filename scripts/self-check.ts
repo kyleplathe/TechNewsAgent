@@ -33,6 +33,24 @@ i'm seeing a repair beat + an openai update, and the wolves got a quick mention 
   assert(parsed.indices.length > 0, 'indices parsed');
   assert(parsed.indices.every((n) => Number.isInteger(n) && n >= 1 && n <= 20), 'indices in range');
   assert(typeof parsed.social === 'string', 'social parsed');
+
+  const multilineSourcesRaw = `
+<<<ON_AIR>>>
+WOLVES UP TOP, SKATE AT THE END.
+
+<<<SOURCES>>>
+2, 5
+7
+9 11
+
+<<<SOCIAL>>>
+quick post body
+`;
+  const multilineParsed = parseStudioOutput(multilineSourcesRaw, 20);
+  assert(
+    multilineParsed.indices.join(',') === '2,5,7,9,11',
+    'multi-line SOURCES indices parsed in order'
+  );
 }
 
 function runSocialChecks() {

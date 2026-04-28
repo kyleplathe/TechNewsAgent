@@ -219,6 +219,12 @@ type Collected = {
   date: string;
 };
 
+type FinalSegment = {
+  index: number;
+  storyIndex: number;
+  row: Collected;
+};
+
 type CultureSectionMode = 'AUTO' | 'SKATE' | 'LOCAL';
 
 function cultureSectionMode(): CultureSectionMode {
@@ -405,6 +411,29 @@ function onAirReferencesSkateBeat(onAir: string): boolean {
   return ON_AIR_SKATE_RE.test(onAir);
 }
 
+function buildFinalSegments(indices: number[], collected: Collected[]): FinalSegment[] {
+  const out: FinalSegment[] = [];
+  for (const idx of indices) {
+    const row = collected[idx - 1];
+    if (!row?.link?.trim()) continue;
+    out.push({ index: out.length + 1, storyIndex: idx, row });
+  }
+  return out;
+}
+
+function autoRepairOnAirCultureMismatch(onAir: string, finalSegments: FinalSegment[]): string {
+  let next = onAir.trim();
+  const hasWolvesSelected = finalSegments.some((s) => s.row.section === 'LOCAL');
+  const hasSkateSelected = finalSegments.some((s) => s.row.section === 'SKATE');
+  if (hasWolvesSelected && !onAirReferencesWolvesBeat(next)) {
+    next += '\n\nQUICK LOCAL CHECK: THE TIMBERWOLVES ANGLE STAYS IN THE MIX TODAY.';
+  }
+  if (hasSkateSelected && !onAirReferencesSkateBeat(next)) {
+    next += '\n\nAND A SKATEBOARDING BEAT STAYS IN THE STACK TODAY.';
+  }
+  return next.trim();
+}
+
 /**
  * Culture/sports must not sit between core beats — avoids "Wolves/skate, then more tech" in the VO.
  * Single culture: first or last in <<<SOURCES>>>. Rare Wolves+skate: [LOCAL] first, [SKATE] last.
@@ -465,7 +494,8 @@ function validateStudioOutput(
   indices: number[],
   localBizName: string,
   selectedStories: Collected[],
-  shouldRequireSkateBeat: boolean
+  shouldRequireSkateBeat: boolean,
+  cultureMode: CultureSectionMode
 ): string[] {
   const issues: string[] = [];
   const sourceCount = indices.length;
@@ -482,6 +512,16 @@ function validateStudioOutput(
   }
   const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
   const hasSkateSelected = selectedStories.some((s) => s.section === 'SKATE');
+  if (cultureMode === 'LOCAL' && !hasWolvesSelected) {
+    issues.push(
+      'CULTURE_SECTION_MODE=LOCAL requires one LOCAL (Timberwolves) source with a valid URL.'
+    );
+  }
+  if (cultureMode === 'SKATE' && !hasSkateSelected) {
+    issues.push(
+      'CULTURE_SECTION_MODE=SKATE requires one SKATE source with a valid URL.'
+    );
+  }
   if (shouldRequireSkateBeat && !hasSkateSelected) {
     issues.push(
       'Skate cadence rule: include one SKATE story in SOURCES this run.'
@@ -1297,6 +1337,7 @@ ${localColorBlock}
   let fixedOnAir = '';
   let onAirForEmail = '';
   let indices: number[] = [];
+  let finalSegments: FinalSegment[] = [];
   let modelSocial = '';
   let validationIssues: string[] = [];
 
@@ -1326,21 +1367,34 @@ ${localColorBlock}
       shouldRequireSkateBeat
     );
     indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
+    finalSegments = buildFinalSegments(indices, collected);
     const programmaticSourceFillIns = indices.filter(
       (i) => !uniqParsed.includes(i)
     );
     modelSocial = parsed.social;
     onAirForEmail = ensureLocalBusinessInOnAir(fixedOnAir, localBizName);
-    const selectedStories = indices
-      .map((i) => collected[i - 1])
-      .filter((c): c is Collected => Boolean(c));
+    onAirForEmail = autoRepairOnAirCultureMismatch(onAirForEmail, finalSegments);
+    const selectedStories = finalSegments.map((s) => s.row);
     validationIssues = validateStudioOutput(
       onAirForEmail,
       indices,
       localBizName,
       selectedStories,
-      shouldRequireSkateBeat
+      shouldRequireSkateBeat,
+      cultureMode
     );
+    const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
+    const hasSkateSelected = selectedStories.some((s) => s.section === 'SKATE');
+    if (onAirReferencesWolvesBeat(onAirForEmail) && !hasWolvesSelected) {
+      validationIssues.push(
+        'ON AIR mentions Wolves but final segment list has no LOCAL source row.'
+      );
+    }
+    if (onAirReferencesSkateBeat(onAirForEmail) && !hasSkateSelected) {
+      validationIssues.push(
+        'ON AIR mentions skate but final segment list has no SKATE source row.'
+      );
+    }
     if (programmaticSourceFillIns.length) {
       validationIssues.push(
         `<<<SOURCES>>> required programmatic fill-in for story number(s) ${programmaticSourceFillIns.join(', ')} — emit exactly ${TARGET_SOURCE_STORIES} distinct valid indices with real URLs (at most one [LOCAL] Timberwolves pick; no duplicate numbers).`
@@ -1360,9 +1414,8 @@ ${localColorBlock}
   }
 
   if (validationIssues.length) {
-    console.warn(
-      'Proceeding after validation retries exhausted; preserving best effort output:\n' +
-        validationIssues.join('\n')
+    throw new Error(
+      'Validation failed after retries:\n' + validationIssues.join('\n')
     );
   }
   if (onAirForEmail.trim() !== fixedOnAir.trim()) {
@@ -1379,25 +1432,17 @@ ${localColorBlock}
     process.env.USE_ON_AIR_SOURCE_REORDER?.trim() === '1'
       ? reorderIndicesToMatchOnAir(indices, collected, fixedOnAir)
       : indices;
-
-  /**
-   * Keep **`storyIndex`** aligned with each row. The old pattern
-   * `.map(...).filter(Boolean).filter(c => c.link)` dropped items and broke
-   * `orderedIndices[j]` pairing — screenshots (keyed by `storyIndex`) could attach
-   * to the wrong headline on the blog.
-   */
-  const usedWithStoryIndex: Array<{ storyIndex: number; row: Collected }> = [];
-  for (const i of orderedIndices) {
-    const c = collected[i - 1];
-    if (!c?.link?.trim()) {
-      console.warn(
-        `Source #${i} omitted from link list — missing or empty URL (check feed item).`
-      );
-      continue;
-    }
-    usedWithStoryIndex.push({ storyIndex: i, row: c });
+  if (
+    process.env.USE_ON_AIR_SOURCE_REORDER?.trim() === '1' &&
+    orderedIndices.join(',') !== indices.join(',')
+  ) {
+    console.warn(
+      `SOURCE ORDER: USE_ON_AIR_SOURCE_REORDER changed order from [${indices.join(', ')}] to [${orderedIndices.join(', ')}].`
+    );
   }
-  const used = usedWithStoryIndex.map((u) => u.row);
+
+  finalSegments = buildFinalSegments(orderedIndices, collected);
+  const used = finalSegments.map((s) => s.row);
 
   const socialHeadline = formatSocialHeadline();
   let socialBody = normalizeSocialBodySentenceCase(
@@ -1419,12 +1464,15 @@ ${localColorBlock}
     shortTags
   );
 
-  if (!orderedIndices.length) {
+  if (!finalSegments.length) {
     console.warn(
       'No <<<SOURCES>>> line parsed — email will omit screenshot links (check model output).'
     );
   } else {
-    console.log('Sources used for segment (screenshots):', orderedIndices.join(', '));
+    console.log(
+      'Sources used for segment (screenshots):',
+      finalSegments.map((s) => s.storyIndex).join(', ')
+    );
   }
 
   const localBizWebsiteResolved = normalizeWebsiteUrl(
@@ -1456,20 +1504,12 @@ ${localColorBlock}
       ? linksHtmlRows.join('')
       : `<p style="color:#888;font-size:13px">No parsed source list — model did not return <<<SOURCES>>> lines, or no URLs in those items.</p>`;
 
-  const screenshotItems = orderedIndices
-    .map((storyIdx) => {
-      const c = collected[storyIdx - 1];
-      if (!c) return null;
-      const link = c.link?.trim();
-      if (!link) return null;
-      return {
-        storyIndex: storyIdx,
-        section: c.section,
-        title: c.title,
-        link,
-      };
-    })
-    .filter((x): x is NonNullable<typeof x> => x !== null);
+  const screenshotItems = finalSegments.map((segment) => ({
+    storyIndex: segment.storyIndex,
+    section: segment.row.section,
+    title: segment.row.title,
+    link: segment.row.link.trim(),
+  }));
 
   let attachments:
     | Array<{ filename: string; content: Buffer; contentType?: string }>
@@ -1806,7 +1846,7 @@ ${localColorBlock}
     const { writeTechNewsWebBundle } = await import('./web_publish');
     const bizForSeo: LocalBusiness = { ...pickedBiz, name: localBizName };
     const seoKeywords = buildSeoKeywords(bizForSeo, used);
-    const webStories = usedWithStoryIndex.map(({ storyIndex, row: c }) => {
+    const webStories = finalSegments.map(({ storyIndex, row: c }) => {
       const shot = screenshotKept.find((k) => k.storyIndex === storyIndex);
       const imageFilename = shot?.filename;
       if (imageFilename) {
@@ -1852,10 +1892,9 @@ ${localColorBlock}
     });
   }
 
-  if (orderedIndices.length) {
-    const newEntries: AirLogEntry[] = orderedIndices
-      .map((idx) => collected[idx - 1])
-      .filter(Boolean)
+  if (finalSegments.length) {
+    const newEntries: AirLogEntry[] = finalSegments
+      .map((segment) => segment.row)
       .map((c) => ({
         fingerprint: titleFingerprint(c.title),
         title: c.title,
