@@ -706,6 +706,38 @@ function enforceWeeklySkateCadence(
   return enforceSourceSectionCaps(out, collected, targetCount);
 }
 
+/**
+ * If ON AIR explicitly references Wolves/Timberwolves, ensure one LOCAL source
+ * is present so section locks and blog rows stay aligned.
+ */
+function enforceWolvesSourceWhenMentioned(
+  indices: number[],
+  collected: Collected[],
+  targetCount: number,
+  onAir: string
+): number[] {
+  if (!onAirReferencesWolvesBeat(onAir)) return indices;
+  if (indices.some((idx) => collected[idx - 1]?.section === 'LOCAL')) return indices;
+
+  const selected = new Set(indices);
+  let localIdx = -1;
+  for (let i = 1; i <= collected.length; i++) {
+    if (selected.has(i)) continue;
+    const c = collected[i - 1];
+    if (!c?.link?.trim()) continue;
+    if (c.section !== 'LOCAL') continue;
+    localIdx = i;
+    break;
+  }
+  if (localIdx < 0) return indices;
+
+  const out = [...indices];
+  let replaceAt = out.findIndex((idx) => collected[idx - 1]?.section === 'SKATE');
+  if (replaceAt < 0) replaceAt = out.length - 1;
+  if (replaceAt >= 0) out[replaceAt] = localIdx;
+  return enforceSourceSectionCaps(out, collected, targetCount);
+}
+
 function productKey(title: string): string {
   const n = normalizeText(title);
   const keys = [
@@ -1367,6 +1399,12 @@ ${localColorBlock}
       shouldRequireSkateBeat
     );
     indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
+    indices = enforceWolvesSourceWhenMentioned(
+      indices,
+      collected,
+      TARGET_SOURCE_STORIES,
+      fixedOnAir
+    );
     finalSegments = buildFinalSegments(indices, collected);
     const programmaticSourceFillIns = indices.filter(
       (i) => !uniqParsed.includes(i)
@@ -1396,9 +1434,12 @@ ${localColorBlock}
       );
     }
     if (programmaticSourceFillIns.length) {
-      validationIssues.push(
-        `<<<SOURCES>>> required programmatic fill-in for story number(s) ${programmaticSourceFillIns.join(', ')} — emit exactly ${TARGET_SOURCE_STORIES} distinct valid indices with real URLs (at most one [LOCAL] Timberwolves pick; no duplicate numbers).`
-      );
+      const fillInMsg = `<<<SOURCES>>> required programmatic fill-in for story number(s) ${programmaticSourceFillIns.join(', ')} — emit exactly ${TARGET_SOURCE_STORIES} distinct valid indices with real URLs (at most one [LOCAL] Timberwolves pick; no duplicate numbers).`;
+      if (pass <= maxValidationRetries) {
+        validationIssues.push(fillInMsg);
+      } else {
+        console.warn(fillInMsg);
+      }
     }
     if (hasAdjacentDuplicateNewsParagraphs(fixedOnAir)) {
       validationIssues.push(
