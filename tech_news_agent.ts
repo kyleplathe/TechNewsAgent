@@ -706,32 +706,6 @@ function findLastCoreSlotPosition(
   return -1;
 }
 
-/**
- * When exactly one Wolves + one skate URL are selected, enforce **[LOCAL] first,
- * **[SKATE] last** so validateCultureBeatPlacement passes after programmatic swaps.
- */
-function normalizeDualCultureSourceOrder(
-  indices: number[],
-  collected: Collected[]
-): number[] {
-  const localStoryIdx = indices.find(
-    (i) => collected[i - 1]?.section === 'LOCAL'
-  );
-  const skateStoryIdx = indices.find(
-    (i) => collected[i - 1]?.section === 'SKATE'
-  );
-  if (localStoryIdx === undefined || skateStoryIdx === undefined) return indices;
-  if (localStoryIdx === skateStoryIdx) return indices;
-
-  const coreInOrder = indices.filter((i) => {
-    const s = collected[i - 1]?.section;
-    return s === 'TECH' || s === 'REPAIR' || s === 'HARDWARE';
-  });
-  if (coreInOrder.length + 2 !== indices.length) return indices;
-
-  return [localStoryIdx, ...coreInOrder, skateStoryIdx];
-}
-
 function enforceSourceSectionCaps(
   indices: number[],
   collected: Collected[],
@@ -1530,6 +1504,8 @@ ${localColorBlock}
   let rawOut = '';
   let fixedOnAir = '';
   let onAirForEmail = '';
+  /** Parsed <<<VIDEO_PROMPT>>> when the model emits it (optional). */
+  let geminiVideoPrompt = '';
   let indices: number[] = [];
   let finalSegments: FinalSegment[] = [];
   let modelSocial = '';
@@ -1545,6 +1521,7 @@ ${localColorBlock}
     rawOut = await generateWithBackoff(requestText);
     const parsed = parseStudioOutput(rawOut, collected.length);
     fixedOnAir = parsed.onAir.trim();
+    geminiVideoPrompt = parsed.videoPrompt.trim();
     const uniqParsed = toOrderedUniqueSourceIndices(
       parsed.indices,
       collected.length
@@ -1575,7 +1552,6 @@ ${localColorBlock}
       shouldRequireSkateBeat
     );
     indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
-    indices = normalizeDualCultureSourceOrder(indices, collected);
     finalSegments = buildFinalSegments(indices, collected);
     const programmaticSourceFillIns = indices.filter(
       (i) => !uniqParsed.includes(i)
@@ -2089,7 +2065,7 @@ ${localColorBlock}
       ...(instakyleNewsDir ? { instakyleNewsDir } : {}),
       tickerLine,
       socialCaption,
-      videoPrompt: '',
+      videoPrompt: geminiVideoPrompt,
       onAirPlain: onAirForEmail.trim(),
       stories: webStories,
       seoKeywords,
