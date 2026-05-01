@@ -298,6 +298,138 @@ function normalizeText(s: string): string {
     .trim();
 }
 
+/** Tokens too vague to prove a specific SOURCES headline got its own VO beat. */
+const GENERIC_TITLE_ANCHORS = new Set([
+  'apple',
+  'google',
+  'meta',
+  'microsoft',
+  'amazon',
+  'samsung',
+  'intel',
+  'amd',
+  'nvidia',
+  'iphone',
+  'ipad',
+  'macbook',
+  'mac',
+  'ios',
+  'android',
+  'watch',
+  'vision',
+  'airpods',
+  'latest',
+  'today',
+  'update',
+  'updates',
+  'news',
+  'breaking',
+  'report',
+  'reports',
+  'announces',
+  'launch',
+  'launches',
+]);
+
+function siliconAnchorsFromTitle(title: string): string[] {
+  const out: string[] = [];
+  for (const m of title.matchAll(/\bm\d+[a-z]?\b/gi)) {
+    const t = normalizeText(m[0] ?? '');
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+/**
+ * One distinguishing token per picked story so ON AIR cannot merge multiple headlines into one “Apple roundup”
+ * or name-drop Meta / TSMC without covering that headline.
+ */
+function primaryAnchorsForStories(stories: Collected[]): (string | null)[] {
+  const titlesNorm = stories.map((s) => normalizeText(s.title));
+  const silicon = stories.map((s) => siliconAnchorsFromTitle(s.title));
+
+  return stories.map((_, i) => {
+    const words = titlesNorm[i]!
+      .split(/\s+/)
+      .filter((w) => w.length >= 4)
+      .sort((a, b) => b.length - a.length);
+
+    const tryPick = (predicate: (w: string) => boolean): string | null => {
+      for (const w of words) {
+        if (!predicate(w)) continue;
+        const inOthers = titlesNorm.some((t, j) => j !== i && t.includes(w));
+        if (!inOthers) return w;
+      }
+      return null;
+    };
+
+    for (const s of silicon[i] ?? []) {
+      const hit = tryPick((w) => w === s);
+      if (hit) return hit;
+    }
+
+    const distinct =
+      tryPick((w) => !GENERIC_TITLE_ANCHORS.has(w)) ??
+      tryPick(() => true) ??
+      null;
+    if (distinct) return distinct;
+
+    const fallback = words.find((w) => !GENERIC_TITLE_ANCHORS.has(w));
+    return fallback ?? words[0] ?? null;
+  });
+}
+
+/** VO paragraphs before sign-off — models must separate beats with blank lines so structure stays 1:1 with <<<SOURCES>>>. */
+function countParagraphBlocksBeforeSignoff(onAir: string): number {
+  const normalized = onAir.replace(/\r\n/g, '\n').trim();
+  const cut = normalized.search(/\n\s*BACK TO THE SOLDERING IRON\./i);
+  const head = cut >= 0 ? normalized.slice(0, cut) : normalized;
+  const afterOpen = head.replace(/^LIVE FROM THE BENCH IN LINDEN HILLS[^\n]*\n*/i, '').trim();
+  if (!afterOpen) return 0;
+  return afterOpen.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean).length;
+}
+
+/** Names models often paste without a matching headline in <<<SOURCES>>>. */
+function validateUnsourcedBrandMentions(
+  onAir: string,
+  selectedStories: Collected[]
+): string[] {
+  const issues: string[] = [];
+  const blob = selectedStories.map((s) => `${s.title}\n${s.link}`).join('\n');
+  const checks: Array<{ re: RegExp; label: string }> = [
+    { re: /\bMETA\b|\bFACEBOOK\b/i, label: 'Meta/Facebook' },
+    { re: /\bTSMC\b/i, label: 'TSMC' },
+  ];
+  for (const { re, label } of checks) {
+    if (!re.test(onAir)) continue;
+    if (re.test(blob)) continue;
+    issues.push(
+      `ON AIR mentions **${label}** but none of the ${TARGET_SOURCE_STORIES} <<<SOURCES>>> headlines/sources contain that name — drop it or swap in the numbered pick that actually covers it.`
+    );
+  }
+  return issues;
+}
+
+function validateStoryAnchorsInOnAir(
+  onAir: string,
+  selectedStories: Collected[]
+): string[] {
+  const issues: string[] = [];
+  const hay = normalizeText(onAir);
+  const anchors = primaryAnchorsForStories(selectedStories);
+  for (let i = 0; i < selectedStories.length; i++) {
+    const anchor = anchors[i];
+    const row = selectedStories[i];
+    if (!anchor || !row) continue;
+    if (hay.includes(anchor)) continue;
+    const clip = row.title.replace(/\s+/g, ' ').trim().slice(0, 72);
+    issues.push(
+      `ON AIR beat ${i + 1} must reflect its headline (not a merged roundup): weave a concrete keyword from that story (e.g. “${anchor.toUpperCase()}”) — picked row starts “${clip}”.`
+    );
+  }
+  return issues;
+}
+
 function spokenNameAppearsInOnAir(onAir: string, bizName: string): boolean {
   const squash = (s: string) =>
     normalizeText(s).replace(/\s+/g, '');
@@ -665,6 +797,14 @@ function validateStudioOutput(
   if (/\blynx\b/i.test(onAir)) {
     issues.push('ON AIR must not mention Lynx.');
   }
+  const paraBlocks = countParagraphBlocksBeforeSignoff(onAir);
+  if (paraBlocks < TARGET_SOURCE_STORIES) {
+    issues.push(
+      `ON AIR structure: use **one paragraph per <<<SOURCES>>> beat** (blank line between beats, another before the Linden Hills close). Found ${paraBlocks} paragraph block(s) before sign-off; need **at least ${TARGET_SOURCE_STORIES}** — do not merge multiple numbered picks into one “roundup” paragraph (even if they share a brand like Apple).`
+    );
+  }
+  issues.push(...validateUnsourcedBrandMentions(onAir, selectedStories));
+  issues.push(...validateStoryAnchorsInOnAir(onAir, selectedStories));
   const bizMentions = countBusinessMentions(onAir, localBizName);
   if (bizMentions !== 1) {
     issues.push(`ON AIR must mention "${localBizName}" exactly once; got ${bizMentions}.`);
@@ -1375,7 +1515,7 @@ async function runNewsAgent() {
 3) **CLOSE** — Linden Hills color + **one spoken mention** of today’s neighborhood business (see block below), then fixed END lines.`;
 
   const prompt = `
-You are a **direct, plain-spoken** tech reporter at your repair bench in Linden Hills (Minneapolis) — calm morning desk, not hype. You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
+You are a **direct, plain-spoken** tech reporter at your repair bench in Linden Hills (Minneapolis) — calm morning desk, not hype. You cover **Apple** when a numbered headline warrants it — never stitch multiple Apple URLs into one VO beat.
 
 NUMBERED STORIES FOR TODAY — **sorted newest-first**, **each line is numbered 1, 2, 3…** Use those numbers in **<<<SOURCES>>>** (same number = same story = same email JPEG / slide):
 ${storyListText}
@@ -1391,6 +1531,9 @@ ${storyPickRule}
 - **Section/source lock (bidirectional):** **[LOCAL]** in **<<<SOURCES>>>** ↔ you **must** mention Timberwolves / **Wolves** on air for that beat. **[SKATE]** in **<<<SOURCES>>>** ↔ you **must** cover that skate story on air (say **skate/skateboarding** or the outlet, e.g. **Thrasher**). Do **not** list a Wolves URL if you did not speak Wolves; do **not** speak a skate beat without a **[SKATE]** number in **<<<SOURCES>>>**.
 - **Length (non-negotiable):** One vertical take **~75–85 seconds** at a calm read — **four** sourced beats plus neighborhood close. **Budget ~125-175 spoken words** between the fixed START line and the fixed END lines (ALL CAPS reads slow — stay lean). **If you are over budget, shorten each beat** before you drop the **${localBizName}** mention.
 - **No extra headlines:** In **ON AIR**, cover **only** the stories whose numbers you list in **<<<SOURCES>>>**. No bonus or side mentions outside those ${TARGET_SOURCE_STORIES} picks.
+- **One pick = one beat (hard):** Each comma-separated number in **<<<SOURCES>>>** is a **different URL**. Give each pick **its own paragraph** with **at least one distinctive keyword from that headline** (product codename, regulator, app name, etc.). **Never** run three Apple items (or any brand) back-to-back inside **one** paragraph — that reads like one beat but corresponds to three slides / three links.
+- **Vendor fidelity:** Name **Meta**, **TSMC**, etc. **only** when that exact sourced headline is about them (same numbered row). No drive-by chip-industry color unless one of your four picks is that story.
+- **Paragraph breaks:** Put a **blank line between every SOURCES beat** and **before** the Linden Hills / **${localBizName}** close — teleprompter paragraphs map 1:1 to slides.
 - **Tight but not thin:** On **main** beats only, add **one concrete detail** when the headline gives you something real (a number, vendor, mechanism) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
 - **Banned hype / podcast clichés (ON AIR and social — never say or echo):** “hold on to your hat(s),” “buckle up,” “deep dive,” “let’s dive in,” “fire hose,” “grab your popcorn,” “you won’t believe,” “crazy,” “insane” (unless the headline literally uses it), or **any** “fasten your seatbelts” style padding. Sound like a colleague at the bench, not a trailer voice.
 - **Local business (every episode):** After your **four <<<SOURCES>>> beats**, the ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block) — **not** filler.
@@ -1401,7 +1544,7 @@ ${segmentOrderBlock}
 ${localColorBlock}
 
 **COLUMN B — ON AIR (teleprompter / voiceover — spoken words only):**
-- **ALL CAPS.** Each **main** story (**REPAIR** + **TECH**/**HARDWARE**) is **1–3 short lines** max: headline essence + **why it matters** + **one concrete detail** only when it fits without bloat (**skip** the detail if it forces wordiness). **SKATE** / **Wolves**: **≤2 short lines** each; often **one sentence** is enough. No long paragraphs, no recap of the whole web.
+- **ALL CAPS.** Each **main** story (**REPAIR** + **TECH**/**HARDWARE**) is **1–3 short lines** max **inside its own paragraph** (one paragraph per **<<<SOURCES>>>** row): headline essence + **why it matters** + **one concrete detail** only when it fits without bloat (**skip** the detail if it forces wordiness). **SKATE** / **Wolves**: **≤2 short lines** each; often **one sentence** is enough. No long paragraphs, no recap of the whole web, **no multi-story mashups**.
 - **Single continuous take** — write so it flows straight through after the open; **no** “coming up / we’ve also got” runway; no “first story / next up / finally” padding; **no** “hold on to your hats,” **no** “deep dive,” **no** “buckle up” or similar.
 - **Do not** put [B-ROLL] or shot notes in ON AIR.
 - START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. AND WE'VE GOT A LOT HITTING THE SHOP TODAY.

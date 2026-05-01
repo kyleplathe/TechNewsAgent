@@ -612,10 +612,13 @@ export function pickLocalBusiness(): LocalBusiness {
   const d = chicagoParts.day ?? 1;
   const start = Date.UTC(y, 0, 1);
   const dayOfYear = Math.floor((Date.UTC(y, m, d) - start) / 86_400_000);
+  /** Prefer directory entries with a storefront URL so email / bundle artifacts always get a Local Spotlight link when possible. */
+  const pool = BUSINESSES_43RD_UPTON.filter((b) => b.website?.trim()) as LocalBusiness[];
+  const rotation =
+    pool.length > 0 ? pool : (BUSINESSES_43RD_UPTON as LocalBusiness[]);
   const idx =
-    ((dayOfYear % BUSINESSES_43RD_UPTON.length) + BUSINESSES_43RD_UPTON.length) %
-    BUSINESSES_43RD_UPTON.length;
-  return BUSINESSES_43RD_UPTON[idx]!;
+    ((dayOfYear % rotation.length) + rotation.length) % rotation.length;
+  return rotation[idx]!;
 }
 
 export const LOCAL_INTERSECTION_CENTER = '43rd St W & Upton Ave S';
