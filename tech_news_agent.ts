@@ -340,43 +340,59 @@ function siliconAnchorsFromTitle(title: string): string[] {
   return out;
 }
 
+/** Product / SKU fragments models often say aloud differently than one verbose headline verb (e.g. C64 vs REINTRODUCES). */
+function alphanumericAnchorsFromTitle(title: string): string[] {
+  const lower = title.toLowerCase();
+  const out: string[] = [];
+  const re = /\b(?=[a-z0-9]*\d)[a-z0-9]{2,}\b/gi;
+  for (const m of lower.matchAll(re)) {
+    const t = (m[0] ?? '').replace(/[^a-z0-9]/g, '');
+    if (t.length >= 2) out.push(t);
+  }
+  return [...new Set(out)];
+}
+
+const MAX_ANCHOR_CANDIDATES_PER_STORY = 18;
+
 /**
- * One distinguishing token per picked story so ON AIR cannot merge multiple headlines into one “Apple roundup”
- * or name-drop Meta / TSMC without covering that headline.
+ * Ordered keyword candidates for validation — VO may paraphrase one headline token while still covering the story.
+ * Match succeeds if **any** candidate appears in normalized ON AIR text.
  */
-function primaryAnchorsForStories(stories: Collected[]): (string | null)[] {
-  const titlesNorm = stories.map((s) => normalizeText(s.title));
-  const silicon = stories.map((s) => siliconAnchorsFromTitle(s.title));
+function anchorCandidatesForStory(
+  story: Collected,
+  storyIndex: number,
+  allStories: Collected[]
+): string[] {
+  const titlesNorm = allStories.map((s) => normalizeText(s.title));
+  const mine = titlesNorm[storyIndex] ?? '';
+  const words = [...new Set(mine.split(/\s+/).filter((w) => w.length >= 4))].sort(
+    (a, b) => b.length - a.length
+  );
 
-  return stories.map((_, i) => {
-    const words = titlesNorm[i]!
-      .split(/\s+/)
-      .filter((w) => w.length >= 4)
-      .sort((a, b) => b.length - a.length);
+  const silicon = siliconAnchorsFromTitle(story.title);
+  const alnum = alphanumericAnchorsFromTitle(story.title);
 
-    const tryPick = (predicate: (w: string) => boolean): string | null => {
-      for (const w of words) {
-        if (!predicate(w)) continue;
-        const inOthers = titlesNorm.some((t, j) => j !== i && t.includes(w));
-        if (!inOthers) return w;
-      }
-      return null;
-    };
+  const pushUnique = (dst: string[], v: string) => {
+    const x = v.trim().toLowerCase();
+    if (x.length < 3) return;
+    if (!dst.includes(x)) dst.push(x);
+  };
 
-    for (const s of silicon[i] ?? []) {
-      const hit = tryPick((w) => w === s);
-      if (hit) return hit;
-    }
+  const out: string[] = [];
+  for (const x of [...silicon, ...alnum]) pushUnique(out, x);
+  for (const w of words) {
+    if (GENERIC_TITLE_ANCHORS.has(w)) continue;
+    const aloneInBatch = !titlesNorm.some(
+      (t, j) => j !== storyIndex && t.includes(w)
+    );
+    if (aloneInBatch || w.length >= 6) pushUnique(out, w);
+  }
+  for (const w of words) {
+    if (!GENERIC_TITLE_ANCHORS.has(w)) pushUnique(out, w);
+  }
+  for (const w of words) pushUnique(out, w);
 
-    const distinct =
-      tryPick((w) => !GENERIC_TITLE_ANCHORS.has(w)) ??
-      tryPick(() => true) ??
-      null;
-    if (distinct) return distinct;
-
-    const fallback = words.find((w) => !GENERIC_TITLE_ANCHORS.has(w));
-    return fallback ?? words[0] ?? null;
-  });
+  return out.slice(0, MAX_ANCHOR_CANDIDATES_PER_STORY);
 }
 
 /** VO paragraphs before sign-off — models must separate beats with blank lines so structure stays 1:1 with <<<SOURCES>>>. */
@@ -416,15 +432,15 @@ function validateStoryAnchorsInOnAir(
 ): string[] {
   const issues: string[] = [];
   const hay = normalizeText(onAir);
-  const anchors = primaryAnchorsForStories(selectedStories);
   for (let i = 0; i < selectedStories.length; i++) {
-    const anchor = anchors[i];
     const row = selectedStories[i];
-    if (!anchor || !row) continue;
-    if (hay.includes(anchor)) continue;
+    if (!row) continue;
+    const candidates = anchorCandidatesForStory(row, i, selectedStories);
+    if (candidates.some((c) => hay.includes(c))) continue;
     const clip = row.title.replace(/\s+/g, ' ').trim().slice(0, 72);
+    const hint = candidates.slice(0, 4).join(', ') || '(no keywords extracted)';
     issues.push(
-      `ON AIR beat ${i + 1} must reflect its headline (not a merged roundup): weave a concrete keyword from that story (e.g. “${anchor.toUpperCase()}”) — picked row starts “${clip}”.`
+      `ON AIR beat ${i + 1} must reflect its headline (not a merged roundup): include **at least one** concrete keyword from that row — try speaking something like **${hint.toUpperCase()}** — picked headline starts “${clip}”.`
     );
   }
   return issues;
@@ -1625,20 +1641,31 @@ ${localColorBlock}
         signal: AbortSignal.timeout(geminiTimeoutMs),
       });
       const data = (await aiResponse.json()) as GeminiResponse;
-      if (aiResponse.status === 429 && attempt < maxGeminiAttempts) {
-        const msg = data.error?.message ?? '';
+      const msg = data.error?.message ?? '';
+      const retryableOverload =
+        aiResponse.status === 429 ||
+        aiResponse.status === 503 ||
+        aiResponse.status === 502;
+      if (retryableOverload && attempt < maxGeminiAttempts) {
         lastErr = msg;
         const waitSec =
-          parseGeminiRetrySeconds(msg) ?? Math.min(15 * attempt, 90);
+          aiResponse.status === 429
+            ? parseGeminiRetrySeconds(msg) ?? Math.min(15 * attempt, 90)
+            : parseGeminiRetrySeconds(msg) ??
+              Math.min(12 * attempt, 120);
+        const label =
+          aiResponse.status === 429
+            ? '429 rate limit / quota'
+            : `${aiResponse.status} overload / unavailable`;
         console.warn(
-          `Gemini 429 (rate limit / quota window). Waiting ${Math.ceil(waitSec)}s — retry ${attempt + 1}/${maxGeminiAttempts}…`
+          `Gemini ${label}. Waiting ${Math.ceil(waitSec)}s — retry ${attempt + 1}/${maxGeminiAttempts}…`
         );
         await new Promise((r) => setTimeout(r, Math.ceil(waitSec * 1000)));
         continue;
       }
       if (!aiResponse.ok) {
         throw new Error(
-          `Gemini API ${aiResponse.status}: ${data.error?.message ?? JSON.stringify(data)}`
+          `Gemini API ${aiResponse.status}: ${msg || JSON.stringify(data)}`
         );
       }
       const parts = data.candidates?.[0]?.content?.parts;
@@ -1650,7 +1677,7 @@ ${localColorBlock}
     }
     if (!raw) {
       throw new Error(
-        `Gemini: exhausted ${maxGeminiAttempts} attempts (429). Last error: ${lastErr || 'unknown'}`
+        `Gemini: exhausted ${maxGeminiAttempts} attempts (429/503/502). Last error: ${lastErr || 'unknown'}`
       );
     }
     return raw;
