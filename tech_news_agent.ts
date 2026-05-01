@@ -1321,8 +1321,6 @@ async function runNewsAgent() {
     // Quartersnacks /feed/ 301s to HTML — no usable RSS; replaced with working feeds:
     'https://www.freeskatemag.com/feed/',
     'https://www.skateboarding.com/feed',
-    // Substack — `/feed` often 403 from datacenter IPs; `feed.xml` is more reliable.
-    'https://villagepsychic.substack.com/feed.xml',
     // The Berrics
     'https://theberrics.com/feed/',
   ];

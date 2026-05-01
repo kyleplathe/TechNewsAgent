@@ -7,7 +7,7 @@ Single Node script (`tech_news_agent.ts`) pulls RSS (+ NBA.com Timberwolves embe
 - **Tech:** Software, AI/ML, hardware & gadgets, gaming (news + industry), developer ecosystem, security when it’s tech news. Sources are listed in `tech_news_agent.ts` (`techFeeds` / `hardwareFeeds`).
 - **Repair:** Tech repair/right-to-repair/serviceability/teardown beats. Tagged as **Tech Repair** on the blog and prioritized first in the on-air rundown when fresh (`repairFeeds`).
 - **Sports:** Timberwolves — Canis Hoopus RSS + `nba_wolves_news.ts` (NBA.com index). Tagged **[LOCAL]** in prompts; blog JSON uses section label **Timberwolves**.
-- **Skate:** Thrasher, Jenkem, Quartersnacks, Village Psychic, The Berrics (best-effort). Tagged **[SKATE]**.
+- **Skate:** Thrasher, Jenkem, Free Skate Mag, Skateboarding.com, The Berrics (best-effort). Tagged **[SKATE]**.
 - **Close:** Linden Hills neighborhood color + **required** one spoken mention of the chosen local business name (from `LOCAL_BIZ_NAME` or `local_businesses.ts` rotation), organic not a hard sell; Gemini prompt treats this as **non-negotiable** in ON AIR before the fixed sign-off.
 - **Digital assets:** **Bitcoin-only** on-air and in headlines (`passesBitcoinOnlyCurrencyRule`). No altcoins, stablecoins, NFT/DeFi/Web3 industry beats. Set `BITCOIN_ONLY_CURRENCY_RULE=0` to disable filtering.
 
