@@ -400,6 +400,29 @@ function countBusinessMentions(onAir: string, bizName: string): number {
   return m?.length ?? 0;
 }
 
+/**
+ * Gemini often splits one VO beat across several blank-line paragraphs (allowed “1–3 short lines”).
+ * Merge line-like chunks so beat counts track stories, not paragraph breaks.
+ */
+function mergeAdjacentMicroParagraphs(blocks: string[], maxMicroLen = 200): string[] {
+  const out: string[] = [];
+  for (const raw of blocks) {
+    const t = raw.trim();
+    if (!t) continue;
+    const prev = out[out.length - 1];
+    if (
+      prev !== undefined &&
+      prev.length <= maxMicroLen &&
+      t.length <= maxMicroLen
+    ) {
+      out[out.length - 1] = `${prev} ${t}`;
+    } else {
+      out.push(t);
+    }
+  }
+  return out;
+}
+
 function countApproxNewsBeats(onAir: string): number {
   const body = onAir
     .replace(/\r\n/g, '\n')
@@ -410,15 +433,24 @@ function countApproxNewsBeats(onAir: string): number {
     .replace(/BACK TO THE SOLDERING IRON\.[\s\S]*$/i, '')
     .trim();
   if (!body) return 0;
-  const paragraphBlocks = body
+  const blocks = body
     .split(/\n{2,}/)
     .map((b) => b.trim())
-    .filter(Boolean).length;
-  if (paragraphBlocks >= 3) return paragraphBlocks;
-  // Fallback when model returns one dense block: estimate beats from sentence density.
-  const sentenceCount = (body.match(/[.!?](?=\s|$)/g) ?? []).length;
-  if (sentenceCount <= 0) return paragraphBlocks;
-  return Math.max(paragraphBlocks, Math.ceil(sentenceCount / 2));
+    .filter(Boolean);
+  const merged = mergeAdjacentMicroParagraphs(blocks);
+  let beats = merged.length;
+
+  const sentenceMatch = body.match(/[.!?](?=\s|$)/g);
+  const sentenceCount = sentenceMatch?.length ?? 0;
+
+  // When paragraph splitting inflates the count, anchor on spoken sentence density (~2–3 sentences / beat).
+  if (sentenceCount > 0 && merged.length > TARGET_SOURCE_STORIES + 1) {
+    beats = Math.ceil(sentenceCount / 2.6);
+  } else if (beats < 3 && sentenceCount > 0) {
+    beats = Math.max(beats, Math.ceil(sentenceCount / 2));
+  }
+
+  return beats;
 }
 
 /**
@@ -627,7 +659,8 @@ function validateStudioOutput(
     issues.push(`ON AIR must mention "${localBizName}" exactly once; got ${bizMentions}.`);
   }
   const beatCount = countApproxNewsBeats(onAir);
-  const maxAllowedBeats = TARGET_SOURCE_STORIES + 1; // story beats + neighborhood close
+  // Allow an extra paragraph for neighborhood close splits + injected culture lines vs strict one-block close.
+  const maxAllowedBeats = TARGET_SOURCE_STORIES + 2;
   if (beatCount > maxAllowedBeats) {
     issues.push(
       `ON AIR appears to contain too many beats (${beatCount}); keep to ${TARGET_SOURCE_STORIES} story beats plus close.`

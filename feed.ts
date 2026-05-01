@@ -71,6 +71,29 @@ function feedFetchTimeoutMs(): number {
   return Number.isFinite(n) && n >= 3000 ? Math.min(n, 120_000) : 25_000;
 }
 
+/**
+ * Cloudflare-protected hosts (notably Substack) often return **403** to datacenter IPs when the
+ * request looks like an unnamed bot. Use mainstream browser signals; override with **FEED_USER_AGENT**.
+ */
+function feedFetchHeaders(feedUrl: string): HeadersInit {
+  const customUa = process.env.FEED_USER_AGENT?.trim();
+  const ua =
+    customUa ||
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  const u = new URL(feedUrl);
+  const headers: Record<string, string> = {
+    'User-Agent': ua,
+    Accept:
+      'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+  // Same-site referer reduces bot scoring on some Substack / CDN paths from CI IPs.
+  if (u.hostname === 'substack.com' || u.hostname.endsWith('.substack.com')) {
+    headers.Referer = `${u.origin}/`;
+  }
+  return headers;
+}
+
 /** Fetch and parse RSS 2.0 or Atom using WHATWG URL + fetch (no legacy url.parse). */
 export async function parseFeedUrl(feedUrl: string): Promise<ParsedFeed> {
   const u = new URL(feedUrl);
@@ -81,10 +104,7 @@ export async function parseFeedUrl(feedUrl: string): Promise<ParsedFeed> {
   const ms = feedFetchTimeoutMs();
   const res = await fetch(u.href, {
     signal: AbortSignal.timeout(ms),
-    headers: {
-      'User-Agent': 'TechNewsAgent/1.0 (+https://github.com/)',
-      Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
-    },
+    headers: feedFetchHeaders(feedUrl),
   });
   if (!res.ok) {
     throw new Error(`Feed HTTP ${res.status}: ${u.href}`);
