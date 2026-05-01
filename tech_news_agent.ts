@@ -242,7 +242,8 @@ type AirLogEntry = {
   airedAt: string;
 };
 
-const CORE_SOURCE_STORIES = 4;
+/** Three repair/tech/hardware picks + optional sports slot (see caps — never Wolves and skate together). */
+const CORE_SOURCE_STORIES = 3;
 const CULTURE_SOURCE_STORIES = 1;
 const TARGET_SOURCE_STORIES = CORE_SOURCE_STORIES + CULTURE_SOURCE_STORIES;
 const MAX_SOURCE_STORIES = TARGET_SOURCE_STORIES;
@@ -493,16 +494,16 @@ function countOnAirWords(onAir: string): number {
  * Editorial target stays ~150–195 in the prompt; bounds are the automation gate.
  */
 function onAirWordBounds(): { min: number; max: number } {
-  const minParsed = parseInt(process.env.ON_AIR_MIN_WORDS ?? '120', 10);
-  const maxParsed = parseInt(process.env.ON_AIR_MAX_WORDS ?? '228', 10);
+  const minParsed = parseInt(process.env.ON_AIR_MIN_WORDS ?? '105', 10);
+  const maxParsed = parseInt(process.env.ON_AIR_MAX_WORDS ?? '218', 10);
   const min =
     Number.isFinite(minParsed) && minParsed >= 0
       ? Math.min(Math.max(minParsed, 70), 200)
-      : 120;
+      : 105;
   let max =
     Number.isFinite(maxParsed) && maxParsed > 0
       ? Math.min(Math.max(maxParsed, min + 30), 360)
-      : 228;
+      : 218;
   if (max < min + 20) max = min + 20;
   return { min, max };
 }
@@ -557,8 +558,7 @@ function autoRepairOnAirCultureMismatch(
 }
 
 /**
- * Culture/sports must not sit between core beats — avoids "Wolves/skate, then more tech" in the VO.
- * Single culture: first or last in <<<SOURCES>>>. Rare Wolves+skate: [LOCAL] first, [SKATE] last.
+ * At most one sports row ([LOCAL] or [SKATE]); if present it must be first or last in <<<SOURCES>>>.
  */
 function validateCultureBeatPlacement(selectedStories: Collected[]): string[] {
   const issues: string[] = [];
@@ -570,42 +570,20 @@ function validateCultureBeatPlacement(selectedStories: Collected[]): string[] {
     )
     .filter((i) => i >= 0);
 
+  if (positions.length > 1) {
+    issues.push(
+      'Pick **exactly one** sports beat: **[LOCAL]** Timberwolves **or** **[SKATE]** — never both in the same episode.'
+    );
+    return issues;
+  }
+
   if (positions.length === 0) return issues;
 
-  if (positions.length > 2) {
-    issues.push(
-      'Too many [LOCAL]/[SKATE] picks in SOURCES — keep to one culture beat, or at most Wolves plus skate when the prompt allows both.'
-    );
-    return issues;
-  }
-
   const last = selectedStories.length - 1;
-
-  if (positions.length === 1) {
-    const c = positions[0]!;
-    if (c !== 0 && c !== last) {
-      issues.push(
-        'Culture/sports ([LOCAL] or [SKATE]) must be **first or last** in <<<SOURCES>>> / ON AIR order — never between tech/repair beats.'
-      );
-    }
-    return issues;
-  }
-
-  const [a, b] = [positions[0]!, positions[1]!].sort((x, y) => x - y);
-  if (a !== 0 || b !== last) {
+  const c = positions[0]!;
+  if (c !== 0 && c !== last) {
     issues.push(
-      'With both Wolves and skate, [LOCAL] must be first and [SKATE] last in <<<SOURCES>>> / ON AIR — core beats only in the middle.'
-    );
-    return issues;
-  }
-  const head = selectedStories[0];
-  const tail = selectedStories[last];
-  if (
-    head?.section !== 'LOCAL' ||
-    tail?.section !== 'SKATE'
-  ) {
-    issues.push(
-      'When using both Wolves and skate: story **1** must be [LOCAL], story **5** must be [SKATE].'
+      'Sports ([LOCAL] or [SKATE]) must be **first or last** in <<<SOURCES>>> — never between core beats.'
     );
   }
   return issues;
@@ -627,9 +605,18 @@ function validateStudioOutput(
     );
   }
   const localCount = selectedStories.filter((s) => s.section === 'LOCAL').length;
+  const skateCount = selectedStories.filter((s) => s.section === 'SKATE').length;
   if (localCount > 1) {
     issues.push(
       `SOURCES must include at most 1 LOCAL (Timberwolves) story; got ${localCount}.`
+    );
+  }
+  if (skateCount > 1) {
+    issues.push(`SOURCES must include at most 1 SKATE story; got ${skateCount}.`);
+  }
+  if (localCount >= 1 && skateCount >= 1) {
+    issues.push(
+      'SOURCES must include **at most one** sports story total: [LOCAL] **or** [SKATE], never both.'
     );
   }
   const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
@@ -690,12 +677,12 @@ function validateStudioOutput(
   const { min: onAirMin, max: onAirMax } = onAirWordBounds();
   if (words > onAirMax) {
     issues.push(
-      `ON AIR is too long (${words} words); trim so total between START and END is ${onAirMin}–${onAirMax} words (editorial target ~150–195 after injections — drop clauses per beat if needed).`
+      `ON AIR is too long (${words} words); trim so total between START and END is ${onAirMin}–${onAirMax} words (editorial target ~125–175 after injections — drop clauses per beat if needed).`
     );
   }
   if (words < onAirMin) {
     issues.push(
-      `ON AIR is too short (${words} words); expand to ${onAirMin}–${onAirMax} words (editorial target ~150–195 — add one concrete detail per beat where thin).`
+      `ON AIR is too short (${words} words); expand to ${onAirMin}–${onAirMax} words (editorial target ~125–175 — add one concrete detail per beat where thin).`
     );
   }
   if (words > 195 && words <= onAirMax) {
@@ -736,54 +723,15 @@ function findLastCoreSlotPosition(
   return -1;
 }
 
-/**
- * When exactly one Wolves + one skate URL are selected, enforce **[LOCAL] first,
- * **[SKATE] last** so validators and downstream artifacts agree on segment shape.
- *
- * **Important:** The Gemini prompt requires ON AIR to follow the same order (Wolves →
- * core beats → skate → close). If the model violates that after normalization, we rely
- * on validation retries — we do not rewrite spoken paragraphs here.
- */
-function normalizeDualCultureSourceOrder(
-  indices: number[],
-  collected: Collected[]
-): number[] {
-  const localStoryIdx = indices.find(
-    (i) => collected[i - 1]?.section === 'LOCAL'
-  );
-  const skateStoryIdx = indices.find(
-    (i) => collected[i - 1]?.section === 'SKATE'
-  );
-  if (localStoryIdx === undefined || skateStoryIdx === undefined) return indices;
-  if (localStoryIdx === skateStoryIdx) return indices;
-
-  const coreInOrder = indices.filter((i) => {
-    const s = collected[i - 1]?.section;
-    return s === 'TECH' || s === 'REPAIR' || s === 'HARDWARE';
-  });
-  if (coreInOrder.length + 2 !== indices.length) return indices;
-
-  const normalized = [localStoryIdx, ...coreInOrder, skateStoryIdx];
-  const before = indices.join(',');
-  const after = normalized.join(',');
-  if (before !== after) {
-    console.warn(
-      `SOURCES: normalized dual-culture order [${indices.join(', ')}] → [${normalized.join(', ')}]. ON AIR must open with Wolves and end news with skate (same order as <<<SOURCES>>>).`
-    );
-  }
-  return normalized;
-}
-
 function enforceSourceSectionCaps(
   indices: number[],
   collected: Collected[],
   targetCount: number
 ): number[] {
-  // Hard rule: never publish 2 Wolves stories in one episode.
+  /** At most one sports slot per episode: Timberwolves **or** skate, never both. */
+  let keptSports = 0;
   const keep: number[] = [];
   const seen = new Set<number>();
-  let keptLocal = 0;
-  let keptSkate = 0;
 
   for (const idx of indices) {
     if (keep.length >= targetCount) break;
@@ -794,14 +742,9 @@ function enforceSourceSectionCaps(
     const c = collected[n - 1];
     if (!c) continue;
 
-    if (c.section === 'LOCAL') {
-      if (keptLocal >= 1) continue;
-      keptLocal++;
-    }
-    if (c.section === 'SKATE') {
-      // Not currently a problem, but keep this tight too.
-      if (keptSkate >= 1) continue;
-      keptSkate++;
+    if (c.section === 'LOCAL' || c.section === 'SKATE') {
+      if (keptSports >= 1) continue;
+      keptSports++;
     }
     seen.add(n);
     keep.push(n);
@@ -809,16 +752,16 @@ function enforceSourceSectionCaps(
 
   if (keep.length >= targetCount) return keep;
 
-  // Top up using newest-first collected list order, avoiding extra LOCAL/SKATE.
+  // Top up using newest-first collected list order; still max one [LOCAL]/[SKATE].
   for (let i = 1; i <= collected.length && keep.length < targetCount; i++) {
     if (seen.has(i)) continue;
     const c = collected[i - 1];
     if (!c) continue;
     if (!c.link) continue;
-    if (c.section === 'LOCAL' && keptLocal >= 1) continue;
-    if (c.section === 'SKATE' && keptSkate >= 1) continue;
-    if (c.section === 'LOCAL') keptLocal++;
-    if (c.section === 'SKATE') keptSkate++;
+    if ((c.section === 'LOCAL' || c.section === 'SKATE') && keptSports >= 1) {
+      continue;
+    }
+    if (c.section === 'LOCAL' || c.section === 'SKATE') keptSports++;
     seen.add(i);
     keep.push(i);
   }
@@ -888,6 +831,12 @@ function enforceWeeklySkateCadence(
   if (skateIdx < 0) return indices;
 
   const out = [...indices];
+  const localPos = out.findIndex((idx) => collected[idx - 1]?.section === 'LOCAL');
+  if (localPos >= 0) {
+    out[localPos] = skateIdx;
+    return enforceSourceSectionCaps(out, collected, targetCount);
+  }
+
   let replaceAt = findLastCoreSlotPosition(out, collected);
   if (replaceAt < 0) {
     for (let pos = out.length - 1; pos >= 0; pos--) {
@@ -930,12 +879,9 @@ function enforceWolvesSourceWhenMentioned(
   if (localIdx < 0) return indices;
 
   const out = [...indices];
-  let replaceAt = -1;
-  if (preserveSkateForWeeklyCadence) {
+  let replaceAt = out.findIndex((idx) => collected[idx - 1]?.section === 'SKATE');
+  if (replaceAt < 0 && preserveSkateForWeeklyCadence) {
     replaceAt = findLastCoreSlotPosition(out, collected);
-  }
-  if (replaceAt < 0) {
-    replaceAt = out.findIndex((idx) => collected[idx - 1]?.section === 'SKATE');
   }
   if (replaceAt < 0) replaceAt = out.length - 1;
   if (replaceAt >= 0) out[replaceAt] = localIdx;
@@ -1365,34 +1311,26 @@ async function runNewsAgent() {
     })
     .join('\n\n');
 
-  const hasWolves = collected.some((c) => c.section === 'LOCAL');
   const hasSkate = collected.some((c) => c.section === 'SKATE');
   const shouldRequireSkateBeat =
     cultureMode !== 'LOCAL' && hasSkate && !skateBeatRecentlyAired;
 
-  const dualCultureStrictReminder =
-    hasWolves && hasSkate
-      ? `- **Wolves + skate together (hard validator shape):** If your five picks include **both** one **[LOCAL]** Timberwolves story **and** one **[SKATE]** story, **<<<SOURCES>>>** **must** list **five numbers** in this shape only: **LOCAL first**, **three core** (**[REPAIR]**/**[TECH]**/**[HARDWARE]** only) in the middle, **[SKATE] last** — example pattern \`12,3,5,7,18\` means story **12** is **[LOCAL]**, stories **3,5,7** are core, **18** is **[SKATE]**. **ON AIR** must deliver beats in that **exact** sequence after START (Wolves beat → three core beats → skate beat → neighborhood close). Listing skate before Wolves or putting either culture slot between core beats **fails validation**.`
-      : '';
-
   const cultureRule =
     cultureMode === 'SKATE'
-      ? '- **Culture slot (forced):** Include **one [SKATE]** beat (when any skate item exists). **Do not** include **[LOCAL]** Timberwolves on this run.'
+      ? '- **Sports slot (forced):** Include **exactly one [SKATE]** beat (when any skate item exists). **Do not** include **[LOCAL]** Timberwolves on this run.'
       : cultureMode === 'LOCAL'
-        ? '- **Culture slot (forced):** Include **one [LOCAL]** Timberwolves beat (when any Wolves item exists). **Do not** include **[SKATE]** on this run.'
+        ? '- **Sports slot (forced):** Include **exactly one [LOCAL]** Timberwolves beat (when any Wolves item exists). **Do not** include **[SKATE]** on this run.'
         : shouldRequireSkateBeat
-          ? `- **Culture / sports slot (weekly cadence):** Include **one [SKATE]** beat this run (no skate aired in the last ${skateCadenceDays} days).`
-          : '- **Culture / sports slot:** Keep this as **one beat**. Use **[SKATE]** when a fresh skate item exists; if not, use a fresh **Wolves** (**[LOCAL]**) beat.';
+          ? `- **Sports slot (weekly cadence):** Include **exactly one [SKATE]** beat this run (no skate aired in the last ${skateCadenceDays} days). Do **not** also pick **[LOCAL]** — one sports story total.`
+          : '- **Sports slot (one only):** Include **at most one** sports story in **<<<SOURCES>>>**: either **one [LOCAL]** (Timberwolves) **or** **one [SKATE]** — **never both**. Prefer **[SKATE]** when it’s fresh and strong; otherwise a fresh **Wolves** pick; if neither deserves air, use **four core-only** picks (**[REPAIR]/[TECH]/[HARDWARE]** only).';
 
   const storyPickRule = `- **<<<SOURCES>>> length = slide count:** Pick **exactly ${TARGET_SOURCE_STORIES} story numbers** total (**never ${TARGET_SOURCE_STORIES + 1}+**).
-- **Lineup shape (default):** Build **${CORE_SOURCE_STORIES} core beats** (REPAIR/TECH/HARDWARE) **plus ${CULTURE_SOURCE_STORIES} culture/sports beat** (**[LOCAL]** Timberwolves or **[SKATE]**), then do the neighborhood close.
-- **One Wolves item max:** You may include **at most one [LOCAL] Timberwolves** story number in **<<<SOURCES>>>**. Never pick two Wolves items in the same episode.
-- **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first** (publish time). When several headlines are similarly strong, prefer the **newer** item.
-- **Pillars (wide pool, thin show):** The bench covers **repair/right-to-repair**, **software**, **AI/ML**, **hardware & gadgets**, **Bitcoin-only** digital-asset news (when sourced), **skate**, **Timberwolves**, and the **neighborhood** close. You **do not** need every pillar every episode — pick what is **fresh and worth the air**; skipping skate or Wolves is fine when it keeps you near **~80-90s**.
+- **Lineup shape:** Always **${TARGET_SOURCE_STORIES} picks**. Either (**A**) **three [REPAIR]/[TECH]/[HARDWARE]** + **one sports** pick (**exactly one [LOCAL]** *or* **exactly one [SKATE]** — **never both**), **or** (**B**) **four core-only** picks (all **[REPAIR]/[TECH]/[HARDWARE]** when Wolves/skate don’t earn air). Prefer repair-first when it’s strong.
+- **Neighborhood business:** The Linden Hills close names **one local shop** (chosen by the system). That mention is **not** a numbered story — it comes **after** your four sourced beats in ON AIR only.
+- **Freshest wins:** **NUMBERED STORIES** below are sorted **newest-first**. When several headlines are similarly strong, prefer the **newer** item.
 - ${cultureRule}
-- **Hard slot rule (sports/culture):** Prefer **SKATE** for the culture pick when a fresh skate item exists; otherwise use a fresh **Wolves** beat. **Never** place the culture beat **between** tech/repair stories — it must be **first or last** in your rundown (last is default; first only if you **open** with Wolves/skate).
-- **Fallback sports cue:** If skate is unavailable, use one fresh **Wolves** beat; if both are unavailable, keep the 4 core beats and close.
-- **Hardware** only when it clearly earns it; never force a gadget beat.`;
+- **Sports placement:** If your four picks include **[LOCAL]** or **[SKATE]**, that number must be **first or last** in **<<<SOURCES>>>** (usually **last**, immediately before the neighborhood close). **Never** put sports **between** two core beats.
+- **Hardware:** Only when it clearly earns it — don’t force gadget filler.`;
 
   const pickedBiz = pickLocalBusiness();
   const localBizName =
@@ -1419,17 +1357,10 @@ async function runNewsAgent() {
 - **Non-negotiable:** The spoken name **${localBizName}** must appear **exactly once** in **COLUMN B (ON AIR)** in this close segment **before** “BACK TO THE SOLDERING IRON…” Light praise is fine; avoid influencer clichés, hard sell, “GO CHECK THEM OUT,” or direct calls to action.
 - If you omit **${localBizName}** from ON AIR, the script is **wrong**.${localBizNote ? `\n- Extra note: ${localBizNote}` : ''}`;
 
-  const segmentOrderBlock = hasWolves
-    ? `**SEGMENT ORDER (same in both columns — do not reorder):**
-1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with the strongest **TECH**/**HARDWARE** headline.
-2) **TECH block** — **1–2** beats from **[TECH]** + **[HARDWARE]** (software, AI, hardware, gaming industry, **Bitcoin** when the headline is Bitcoin-specific) — **freshest and most newsworthy**, not “cover everything.”
-3) **ONE culture/sports beat** — either **one [LOCAL] Wolves** and/or **one [SKATE]** (see culture rules above). **Do not** put this beat **between** tech/repair stories: it goes **last** before the close (usual) or **first** if you open with sports — **never** tech → culture → tech.
-4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`
-    : `**SEGMENT ORDER (same in both columns — do not reorder):**
-1) **REPAIR FIRST** — open with one repair / right-to-repair beat from **[REPAIR]** when available and fresh; if no repair beat qualifies, start with the strongest **TECH**/**HARDWARE** headline.
-2) **TECH block** — **1–2** beats from **[TECH]** + **[HARDWARE]** (software, AI, hardware, gaming industry, **Bitcoin** when the headline is Bitcoin-specific) — **freshest and most newsworthy**, not “cover everything.”
-3) **OPTIONAL: SKATE** — one quick **[SKATE]** beat only if it’s legit — **last** news beat before the close (or **first** if you open with it), never sandwiched between tech beats; otherwise skip to close.
-4) **CLOSE** — **Linden Hills / neighborhood beat** (see block below), then soldering / deck; end with the required sign-off.`;
+  const segmentOrderBlock = `**SEGMENT ORDER — ${TARGET_SOURCE_STORIES} numbers in <<<SOURCES>>>**, then neighborhood close (not numbered):
+1) **Three core beats** — **[REPAIR]**/**[TECH]**/**[HARDWARE]** only (repair-first when it’s strong; spread AI/software/hardware/Bitcoin-as-news across those three picks — thin bench, no redundancy).
+2) **Optional fourth flavor:** Either (**a**) **one sports beat only** — **exactly one [LOCAL]** *or* **exactly one [SKATE]** (**never both**) placed **first or last** in your comma list (usually **last** before close), **or** (**b**) a **fourth core** pick instead — four headlines all **[REPAIR]/[TECH]/[HARDWARE]** when Wolves/skate don’t earn air.
+3) **CLOSE** — Linden Hills color + **one spoken mention** of today’s neighborhood business (see block below), then fixed END lines.`;
 
   const prompt = `
 You are a **direct, plain-spoken** tech reporter at your repair bench in Linden Hills (Minneapolis) — calm morning desk, not hype. You’re **big on Apple** when it fits, but you’re a **general tech nerd** — phones, silicon, laptops, the whole bench.
@@ -1439,7 +1370,6 @@ ${storyListText}
 
 QUALITY RULES:
 ${storyPickRule}
-${dualCultureStrictReminder}
 - **Recency (critical):** The list is **pre-filtered** for freshness (**~18 hours** per section by default). Treat everything as **today’s desk** — not “yesterday” or “overnight” unless the item’s date is clearly **today** in US **Central**. Skip stale vibes, republished “classics,” and year-stamped reruns unless the headline proves it’s **new today**. If a headline includes “(2024)” or an old year, it is usually **not** breaking — either skip or frame as “making the rounds again,” not fresh news.
 - Do not invent products, prices, or dates. Stay close to the headlines.
 - **Digital money / chains:** The show is **Bitcoin-only**. Do **not** cover altcoins, stablecoins, NFT/DeFi/Web3 industry, or generic **“crypto”** as an asset class. **Do** cover **Bitcoin** when a sourced headline is clearly about Bitcoin (ETFs, adoption, mining, Lightning, regulation aimed at Bitcoin, etc.). On air, avoid saying **“crypto”** as a bucket — say **Bitcoin** or neutral tech wording.
@@ -1447,11 +1377,11 @@ ${dualCultureStrictReminder}
 - **Wolves / LOCAL** — **Canis Hoopus (RSS)** plus **NBA.com Timberwolves** index (same **[LOCAL]** list). Use the basketball beat **only** when the item is **fresh**; if nothing qualifies, **skip Wolves** entirely.
 - Skateboarding: use **[SKATE]** for one quick, legit beat (premiere, contest, real news). Skip if nothing’s good.
 - **Section/source lock (bidirectional):** **[LOCAL]** in **<<<SOURCES>>>** ↔ you **must** mention Timberwolves / **Wolves** on air for that beat. **[SKATE]** in **<<<SOURCES>>>** ↔ you **must** cover that skate story on air (say **skate/skateboarding** or the outlet, e.g. **Thrasher**). Do **not** list a Wolves URL if you did not speak Wolves; do **not** speak a skate beat without a **[SKATE]** number in **<<<SOURCES>>>**.
-- **Length (non-negotiable):** One vertical take **~80-90 seconds** — treat **~80s as a soft floor** and **~90s as a hard ceiling** at a calm read. **Budget ~150-195 spoken words** between the fixed START line and the fixed END lines (ALL CAPS reads a little slow — stay lean). **If you are over budget, cut beats** before you cut the **${localBizName}** close.
+- **Length (non-negotiable):** One vertical take **~75–85 seconds** at a calm read — **four** sourced beats plus neighborhood close. **Budget ~125-175 spoken words** between the fixed START line and the fixed END lines (ALL CAPS reads slow — stay lean). **If you are over budget, shorten each beat** before you drop the **${localBizName}** mention.
 - **No extra headlines:** In **ON AIR**, cover **only** the stories whose numbers you list in **<<<SOURCES>>>**. No bonus or side mentions outside those ${TARGET_SOURCE_STORIES} picks.
 - **Tight but not thin:** On **main** beats only, add **one concrete detail** when the headline gives you something real (a number, vendor, mechanism) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
 - **Banned hype / podcast clichés (ON AIR and social — never say or echo):** “hold on to your hat(s),” “buckle up,” “deep dive,” “let’s dive in,” “fire hose,” “grab your popcorn,” “you won’t believe,” “crazy,” “insane” (unless the headline literally uses it), or **any** “fasten your seatbelts” style padding. Sound like a colleague at the bench, not a trailer voice.
-- **Local business (every episode):** The ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block). That line is **not** filler — **include it** even on tight ~80-90s reads.
+- **Local business (every episode):** After your **four <<<SOURCES>>> beats**, the ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block) — **not** filler.
 
 You are writing for one **on-air column only** (teleprompter / VO).
 
@@ -1472,10 +1402,10 @@ ${localColorBlock}
 **OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
 
 <<<ON_AIR>>>
-(ALL CAPS — one take, **~80-90s** with **~150-195 words** between START and END; same order as SOURCES; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
+(ALL CAPS — one take **~75–85s**, **~125-175 words** between START and END; spoken order **matches <<<SOURCES>>>** beat-for-beat, then neighborhood close with **${localBizName}** once before **BACK TO THE SOLDERING IRON**.)
 
 <<<SOURCES>>>
-(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`2,5,7,9,11\` = story **2**, then **5**, then **7**, then **9**, then **11**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Single culture:** **[LOCAL]** or **[SKATE]** must be **first or last** in this comma list (usually **last** before the neighborhood close). **Never** sandwich culture **between** two core beats. **Both Wolves and skate in the same episode:** **[LOCAL] number must be first**, **[SKATE] number must be last**, three **[REPAIR]/[TECH]/[HARDWARE]** numbers in the middle — ON AIR must match that spoken order (Wolves → core → core → core → skate → close).)
+(Exactly **one line**: comma-separated **1-based story numbers** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`6,9,14,21\` = four core-only picks; \`6,9,14,3\` = three core + **one sports** pick (**check brackets**: **[LOCAL]** or **[SKATE]** exactly once among the four — never both). **Order = slide order** = email JPEG order = ON AIR beat order. Sports row (**[LOCAL]** or **[SKATE]**) must be **first or last** — usually **last** before the neighborhood close — never sandwiched between core beats.)
 
 <<<SOCIAL>>>
 (**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**. Write **properly**: clean grammar, real sentences (no fragments), correct capitalization (no random lowercase “i”), and normal punctuation. **Write in sentence case** (normal Facebook / Instagram style): capitalize the first word and proper nouns only. **Do not** use ALL CAPS, title case for the whole paragraph, or fake emphasis — platforms flag shouty text as low quality. Standard tech spellings are fine (OpenAI, iPhone, GPU). No “link in bio,” no explaining screenshots. 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler.)
@@ -1629,7 +1559,6 @@ ${localColorBlock}
       shouldRequireSkateBeat
     );
     indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
-    indices = normalizeDualCultureSourceOrder(indices, collected);
     finalSegments = buildFinalSegments(indices, collected);
     const programmaticSourceFillIns = indices.filter(
       (i) => !uniqParsed.includes(i)
@@ -1663,7 +1592,7 @@ ${localColorBlock}
       );
     }
     if (programmaticSourceFillIns.length) {
-      const fillInMsg = `<<<SOURCES>>> required programmatic fill-in for story number(s) ${programmaticSourceFillIns.join(', ')} — emit exactly ${TARGET_SOURCE_STORIES} distinct valid indices with real URLs (at most one [LOCAL] Timberwolves pick; no duplicate numbers).`;
+      const fillInMsg = `<<<SOURCES>>> required programmatic fill-in for story number(s) ${programmaticSourceFillIns.join(', ')} — emit exactly ${TARGET_SOURCE_STORIES} distinct valid indices with real URLs (at most one sports pick: [LOCAL] XOR [SKATE]; no duplicate numbers).`;
       if (pass <= maxValidationRetries) {
         validationIssues.push(fillInMsg);
       } else {
@@ -1672,7 +1601,7 @@ ${localColorBlock}
     }
     if (hasAdjacentDuplicateNewsParagraphs(fixedOnAir)) {
       validationIssues.push(
-        'ON AIR has two consecutive duplicate story paragraphs — remove the repeated block; each of the five beats must cover a different story.'
+        `ON AIR has two consecutive duplicate story paragraphs — remove the repeated block; each of the ${TARGET_SOURCE_STORIES} story beats must cover a different pick.`
       );
     }
     if (!validationIssues.length) break;

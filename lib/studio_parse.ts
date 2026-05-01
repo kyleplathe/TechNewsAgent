@@ -3,7 +3,7 @@ const M_ONAIR = '<<<ON_AIR>>>';
 const M_SOURCES = '<<<SOURCES>>>';
 const M_SOCIAL = '<<<SOCIAL>>>';
 
-const MAX_SOURCE_STORIES = 5;
+const MAX_SOURCE_STORIES = 4;
 
 function parseSourceIndices(afterSources: string, maxIndex: number): number[] {
   const indices = afterSources

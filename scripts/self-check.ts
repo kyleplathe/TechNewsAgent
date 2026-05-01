@@ -20,7 +20,7 @@ REPAIR BEAT HERE.
 BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
 
 <<<SOURCES>>>
-2, 5, 7, 9, 11
+2, 5, 7, 9
 
 <<<SOCIAL>>>
 i'm seeing a repair beat + an openai update, and the wolves got a quick mention too
@@ -48,8 +48,8 @@ quick post body
 `;
   const multilineParsed = parseStudioOutput(multilineSourcesRaw, 20);
   assert(
-    multilineParsed.indices.join(',') === '2,5,7,9,11',
-    'multi-line SOURCES indices parsed in order'
+    multilineParsed.indices.join(',') === '2,5,7,9',
+    'multi-line SOURCES indices parsed in order (cap 4)'
   );
 }
 
