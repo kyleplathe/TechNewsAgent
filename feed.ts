@@ -87,9 +87,18 @@ function feedFetchHeaders(feedUrl: string): HeadersInit {
       'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
   };
-  // Same-site referer reduces bot scoring on some Substack / CDN paths from CI IPs.
+  // Substack / Cloudflare: CI IPs often get **403** on bare `/feed`; browser-like hints help some stacks.
   if (u.hostname === 'substack.com' || u.hostname.endsWith('.substack.com')) {
     headers.Referer = `${u.origin}/`;
+    headers['Sec-CH-UA'] =
+      '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"';
+    headers['Sec-CH-UA-Mobile'] = '?0';
+    headers['Sec-CH-UA-Platform'] = '"macOS"';
+    headers['Sec-Fetch-Dest'] = 'document';
+    headers['Sec-Fetch-Mode'] = 'navigate';
+    headers['Sec-Fetch-Site'] = 'cross-site';
+    headers['Sec-Fetch-User'] = '?1';
+    headers['Upgrade-Insecure-Requests'] = '1';
   }
   return headers;
 }
@@ -120,6 +129,8 @@ export async function parseFeedUrl(feedUrl: string): Promise<ParsedFeed> {
     const alts: string[] = [];
     if (/\/feed$/i.test(path)) {
       alts.push(`${origin}/feed.xml`, `${origin}/rss.xml`);
+    } else if (/\/feed\.xml$/i.test(path)) {
+      alts.push(`${origin}/feed`, `${origin}/rss.xml`);
     } else if (path === '' || path === '/') {
       alts.push(`${origin}/feed.xml`, `${origin}/feed`);
     }
@@ -134,7 +145,9 @@ export async function parseFeedUrl(feedUrl: string): Promise<ParsedFeed> {
   }
 
   if (!res.ok) {
-    throw new Error(`Feed HTTP ${res.status}: ${u.href}`);
+    const finalHref =
+      typeof res.url === 'string' && res.url.length > 0 ? res.url : u.href;
+    throw new Error(`Feed HTTP ${res.status}: ${finalHref}`);
   }
 
   const text = await res.text();

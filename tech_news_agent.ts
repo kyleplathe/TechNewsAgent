@@ -631,9 +631,13 @@ function validateStudioOutput(
       'CULTURE_SECTION_MODE=SKATE requires one SKATE source with a valid URL.'
     );
   }
-  if (shouldRequireSkateBeat && !hasSkateSelected) {
+  if (
+    shouldRequireSkateBeat &&
+    !hasSkateSelected &&
+    !onAirReferencesWolvesBeat(onAir)
+  ) {
     issues.push(
-      'Skate cadence rule: include one SKATE story in SOURCES this run.'
+      'Skate cadence rule: include one SKATE story in SOURCES this run (waived when ON AIR references Wolves — keep [LOCAL] only).'
     );
   }
   // Bidirectional section lock: SOURCES ↔ ON AIR (avoid Wolves URL with no VO line, or VO skate with no URL).
@@ -808,14 +812,22 @@ function hasRecentSkateBeat(
 /**
  * Weekly cadence guardrail: if skate is due and we have a valid skate candidate,
  * ensure one SKATE story is present in SOURCES.
+ *
+ * When the draft ON AIR already references **Wolves**, do **not** inject or swap in skate —
+ * the VO locked to basketball would lose its [LOCAL] URL if we replaced that slot on a second pass.
  */
 function enforceWeeklySkateCadence(
   indices: number[],
   collected: Collected[],
   targetCount: number,
-  shouldRequireSkateBeat: boolean
+  shouldRequireSkateBeat: boolean,
+  onAirDraft?: string
 ): number[] {
   if (!shouldRequireSkateBeat) return indices;
+  const air = onAirDraft?.trim() ?? '';
+  if (air && onAirReferencesWolvesBeat(air)) {
+    return indices;
+  }
   if (indices.some((idx) => collected[idx - 1]?.section === 'SKATE')) return indices;
 
   const selected = new Set(indices);
@@ -1153,8 +1165,8 @@ async function runNewsAgent() {
     // Quartersnacks /feed/ 301s to HTML — no usable RSS; replaced with working feeds:
     'https://www.freeskatemag.com/feed/',
     'https://www.skateboarding.com/feed',
-    // Substack feed
-    'https://villagepsychic.substack.com/feed',
+    // Substack — `/feed` often 403 from datacenter IPs; `feed.xml` is more reliable.
+    'https://villagepsychic.substack.com/feed.xml',
     // The Berrics
     'https://theberrics.com/feed/',
   ];
@@ -1542,7 +1554,8 @@ ${localColorBlock}
       indices,
       collected,
       TARGET_SOURCE_STORIES,
-      shouldRequireSkateBeat
+      shouldRequireSkateBeat,
+      fixedOnAir
     );
     indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
     indices = enforceWolvesSourceWhenMentioned(
@@ -1556,7 +1569,8 @@ ${localColorBlock}
       indices,
       collected,
       TARGET_SOURCE_STORIES,
-      shouldRequireSkateBeat
+      shouldRequireSkateBeat,
+      fixedOnAir
     );
     indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
     finalSegments = buildFinalSegments(indices, collected);
