@@ -329,6 +329,68 @@ function ensureLocalBusinessInOnAir(onAir: string, bizName: string): string {
   return `${t}\n\n${insert}\n\nBACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.`;
 }
 
+const SOLDERING_SIGNOFF_RE = /^([\s\S]*?)(BACK TO THE SOLDERING IRON\b[\s\S]*)$/im;
+
+function insertBeforeSolderingSignOff(onAir: string, paragraph: string): string {
+  const t = onAir.trim();
+  const insert = paragraph.trim();
+  if (!insert) return t;
+  const m = t.match(SOLDERING_SIGNOFF_RE);
+  if (m && m[1] !== undefined && m[2] !== undefined) {
+    return `${m[1].trim()}\n\n${insert}\n\n${m[2].trim()}`;
+  }
+  return `${t}\n\n${insert}`;
+}
+
+/**
+ * Missing sports VO lines belong **before** the Linden Hills / business close, not after sign-off.
+ */
+function insertBeforeNeighborhoodClose(
+  onAir: string,
+  paragraph: string,
+  bizName: string
+): string {
+  const t = onAir.replace(/\r\n/g, '\n').trim();
+  const insert = paragraph.trim();
+  if (!insert) return t;
+
+  let cut = -1;
+  const lindenIdx = t.search(/\bLINDEN HILLS\b/i);
+  if (lindenIdx >= 0) {
+    cut = t.lastIndexOf('\n\n', lindenIdx);
+    if (cut < 0) cut = 0;
+  } else {
+    const bn = bizName.trim();
+    if (bn.length >= 3) {
+      const escaped = bn
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\s+/g, '\\s+');
+      const re = new RegExp(`\\b${escaped}\\b`, 'i');
+      const hit = re.exec(t);
+      if (hit && hit.index !== undefined && hit.index > 0) {
+        cut = t.lastIndexOf('\n\n', hit.index);
+        if (cut < 0) cut = 0;
+      }
+    }
+  }
+
+  if (cut >= 0) {
+    const head = t.slice(0, cut).trimEnd();
+    const tail = t.slice(cut).trimStart();
+    return `${head}\n\n${insert}\n\n${tail}`;
+  }
+  return insertBeforeSolderingSignOff(t, insert);
+}
+
+function briefHeadlineAllCaps(title: string, maxLen = 100): string {
+  let s = title.replace(/\s+/g, ' ').trim();
+  if (!s) return 'HEADLINE ON THE BOARD — SEE SOURCE LINK.';
+  if (s.length > maxLen) {
+    s = `${s.slice(0, maxLen - 3).trimEnd()}...`;
+  }
+  return s.toUpperCase();
+}
+
 function countBusinessMentions(onAir: string, bizName: string): number {
   const hay = normalizeText(onAir);
   const needle = normalizeText(bizName);
@@ -338,22 +400,9 @@ function countBusinessMentions(onAir: string, bizName: string): number {
   return m?.length ?? 0;
 }
 
-/** Appended by autoRepairOnAirCultureMismatch — must not inflate beat/word validation. */
-function stripAutoRepairedCultureParagraphs(onAir: string): string {
-  return onAir
-    .replace(
-      /\n\nQUICK LOCAL CHECK: THE TIMBERWOLVES ANGLE STAYS IN THE MIX TODAY\.?\s*/gi,
-      '\n\n'
-    )
-    .replace(
-      /\n\nAND A SKATEBOARDING BEAT STAYS IN THE STACK TODAY\.?\s*/gi,
-      '\n\n'
-    )
-    .trim();
-}
-
 function countApproxNewsBeats(onAir: string): number {
-  const body = stripAutoRepairedCultureParagraphs(onAir)
+  const body = onAir
+    .replace(/\r\n/g, '\n')
     .replace(
       /^LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE\. AND WE'VE GOT A LOT HITTING THE SHOP TODAY\./i,
       ''
@@ -399,7 +448,8 @@ function hasAdjacentDuplicateNewsParagraphs(onAir: string): boolean {
 }
 
 function countOnAirWords(onAir: string): number {
-  return stripAutoRepairedCultureParagraphs(onAir.replace(/\r\n/g, '\n'))
+  return onAir
+    .replace(/\r\n/g, '\n')
     .trim()
     .split(/\s+/)
     .filter(Boolean).length;
@@ -434,15 +484,22 @@ function buildFinalSegments(indices: number[], collected: Collected[]): FinalSeg
   return out;
 }
 
-function autoRepairOnAirCultureMismatch(onAir: string, finalSegments: FinalSegment[]): string {
+function autoRepairOnAirCultureMismatch(
+  onAir: string,
+  finalSegments: FinalSegment[],
+  localBizName: string
+): string {
   let next = onAir.trim();
-  const hasWolvesSelected = finalSegments.some((s) => s.row.section === 'LOCAL');
-  const hasSkateSelected = finalSegments.some((s) => s.row.section === 'SKATE');
-  if (hasWolvesSelected && !onAirReferencesWolvesBeat(next)) {
-    next += '\n\nQUICK LOCAL CHECK: THE TIMBERWOLVES ANGLE STAYS IN THE MIX TODAY.';
+  const localSeg = finalSegments.find((s) => s.row.section === 'LOCAL');
+  const skateSeg = finalSegments.find((s) => s.row.section === 'SKATE');
+
+  if (localSeg && !onAirReferencesWolvesBeat(next)) {
+    const line = `TIMBERWOLVES BEAT — ${briefHeadlineAllCaps(localSeg.row.title)}`;
+    next = insertBeforeNeighborhoodClose(next, line, localBizName);
   }
-  if (hasSkateSelected && !onAirReferencesSkateBeat(next)) {
-    next += '\n\nAND A SKATEBOARDING BEAT STAYS IN THE STACK TODAY.';
+  if (skateSeg && !onAirReferencesSkateBeat(next)) {
+    const line = `SKATEBOARDING BEAT — ${briefHeadlineAllCaps(skateSeg.row.title)}`;
+    next = insertBeforeNeighborhoodClose(next, line, localBizName);
   }
   return next.trim();
 }
@@ -577,8 +634,8 @@ function validateStudioOutput(
     );
   }
   const words = countOnAirWords(onAir);
-  if (words > 205) {
-    issues.push(`ON AIR is too long (${words} words); trim to ~150-195 words for an ~80-90s read.`);
+  if (words > 195) {
+    issues.push(`ON AIR is too long (${words} words); trim to ~150-195 words for an ~80-90s read (hard ceiling ~90s).`);
   }
   if (words < 140) {
     issues.push(`ON AIR is too short (${words} words); expand to ~150-195 words for an ~80-90s read.`);
@@ -1492,7 +1549,11 @@ ${localColorBlock}
     );
     modelSocial = parsed.social;
     onAirForEmail = ensureLocalBusinessInOnAir(fixedOnAir, localBizName);
-    onAirForEmail = autoRepairOnAirCultureMismatch(onAirForEmail, finalSegments);
+    onAirForEmail = autoRepairOnAirCultureMismatch(
+      onAirForEmail,
+      finalSegments,
+      localBizName
+    );
     const selectedStories = finalSegments.map((s) => s.row);
     validationIssues = validateStudioOutput(
       onAirForEmail,
