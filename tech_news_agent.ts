@@ -338,8 +338,22 @@ function countBusinessMentions(onAir: string, bizName: string): number {
   return m?.length ?? 0;
 }
 
+/** Appended by autoRepairOnAirCultureMismatch — must not inflate beat/word validation. */
+function stripAutoRepairedCultureParagraphs(onAir: string): string {
+  return onAir
+    .replace(
+      /\n\nQUICK LOCAL CHECK: THE TIMBERWOLVES ANGLE STAYS IN THE MIX TODAY\.?\s*/gi,
+      '\n\n'
+    )
+    .replace(
+      /\n\nAND A SKATEBOARDING BEAT STAYS IN THE STACK TODAY\.?\s*/gi,
+      '\n\n'
+    )
+    .trim();
+}
+
 function countApproxNewsBeats(onAir: string): number {
-  const body = onAir
+  const body = stripAutoRepairedCultureParagraphs(onAir)
     .replace(
       /^LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE\. AND WE'VE GOT A LOT HITTING THE SHOP TODAY\./i,
       ''
@@ -385,8 +399,7 @@ function hasAdjacentDuplicateNewsParagraphs(onAir: string): boolean {
 }
 
 function countOnAirWords(onAir: string): number {
-  return onAir
-    .replace(/\r\n/g, '\n')
+  return stripAutoRepairedCultureParagraphs(onAir.replace(/\r\n/g, '\n'))
     .trim()
     .split(/\s+/)
     .filter(Boolean).length;
@@ -586,6 +599,49 @@ function titleFingerprint(title: string): string {
   return tokens.join(' ');
 }
 
+function findLastCoreSlotPosition(
+  indices: number[],
+  collected: Collected[]
+): number {
+  for (let pos = indices.length - 1; pos >= 0; pos--) {
+    const c = collected[indices[pos] - 1];
+    if (
+      c?.section === 'TECH' ||
+      c?.section === 'REPAIR' ||
+      c?.section === 'HARDWARE'
+    ) {
+      return pos;
+    }
+  }
+  return -1;
+}
+
+/**
+ * When exactly one Wolves + one skate URL are selected, enforce **[LOCAL] first,
+ * **[SKATE] last** so validateCultureBeatPlacement passes after programmatic swaps.
+ */
+function normalizeDualCultureSourceOrder(
+  indices: number[],
+  collected: Collected[]
+): number[] {
+  const localStoryIdx = indices.find(
+    (i) => collected[i - 1]?.section === 'LOCAL'
+  );
+  const skateStoryIdx = indices.find(
+    (i) => collected[i - 1]?.section === 'SKATE'
+  );
+  if (localStoryIdx === undefined || skateStoryIdx === undefined) return indices;
+  if (localStoryIdx === skateStoryIdx) return indices;
+
+  const coreInOrder = indices.filter((i) => {
+    const s = collected[i - 1]?.section;
+    return s === 'TECH' || s === 'REPAIR' || s === 'HARDWARE';
+  });
+  if (coreInOrder.length + 2 !== indices.length) return indices;
+
+  return [localStoryIdx, ...coreInOrder, skateStoryIdx];
+}
+
 function enforceSourceSectionCaps(
   indices: number[],
   collected: Collected[],
@@ -700,7 +756,16 @@ function enforceWeeklySkateCadence(
   if (skateIdx < 0) return indices;
 
   const out = [...indices];
-  let replaceAt = out.findIndex((idx) => collected[idx - 1]?.section === 'LOCAL');
+  let replaceAt = findLastCoreSlotPosition(out, collected);
+  if (replaceAt < 0) {
+    for (let pos = out.length - 1; pos >= 0; pos--) {
+      const c = collected[out[pos] - 1];
+      if (c?.section !== 'LOCAL') {
+        replaceAt = pos;
+        break;
+      }
+    }
+  }
   if (replaceAt < 0) replaceAt = out.length - 1;
   if (replaceAt >= 0) out[replaceAt] = skateIdx;
   return enforceSourceSectionCaps(out, collected, targetCount);
@@ -714,7 +779,8 @@ function enforceWolvesSourceWhenMentioned(
   indices: number[],
   collected: Collected[],
   targetCount: number,
-  onAir: string
+  onAir: string,
+  preserveSkateForWeeklyCadence: boolean
 ): number[] {
   if (!onAirReferencesWolvesBeat(onAir)) return indices;
   if (indices.some((idx) => collected[idx - 1]?.section === 'LOCAL')) return indices;
@@ -732,7 +798,13 @@ function enforceWolvesSourceWhenMentioned(
   if (localIdx < 0) return indices;
 
   const out = [...indices];
-  let replaceAt = out.findIndex((idx) => collected[idx - 1]?.section === 'SKATE');
+  let replaceAt = -1;
+  if (preserveSkateForWeeklyCadence) {
+    replaceAt = findLastCoreSlotPosition(out, collected);
+  }
+  if (replaceAt < 0) {
+    replaceAt = out.findIndex((idx) => collected[idx - 1]?.section === 'SKATE');
+  }
   if (replaceAt < 0) replaceAt = out.length - 1;
   if (replaceAt >= 0) out[replaceAt] = localIdx;
   return enforceSourceSectionCaps(out, collected, targetCount);
@@ -1403,8 +1475,17 @@ ${localColorBlock}
       indices,
       collected,
       TARGET_SOURCE_STORIES,
-      fixedOnAir
+      fixedOnAir,
+      shouldRequireSkateBeat
     );
+    indices = enforceWeeklySkateCadence(
+      indices,
+      collected,
+      TARGET_SOURCE_STORIES,
+      shouldRequireSkateBeat
+    );
+    indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
+    indices = normalizeDualCultureSourceOrder(indices, collected);
     finalSegments = buildFinalSegments(indices, collected);
     const programmaticSourceFillIns = indices.filter(
       (i) => !uniqParsed.includes(i)
