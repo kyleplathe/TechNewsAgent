@@ -706,6 +706,44 @@ function findLastCoreSlotPosition(
   return -1;
 }
 
+/**
+ * When exactly one Wolves + one skate URL are selected, enforce **[LOCAL] first,
+ * **[SKATE] last** so validators and downstream artifacts agree on segment shape.
+ *
+ * **Important:** The Gemini prompt requires ON AIR to follow the same order (Wolves →
+ * core beats → skate → close). If the model violates that after normalization, we rely
+ * on validation retries — we do not rewrite spoken paragraphs here.
+ */
+function normalizeDualCultureSourceOrder(
+  indices: number[],
+  collected: Collected[]
+): number[] {
+  const localStoryIdx = indices.find(
+    (i) => collected[i - 1]?.section === 'LOCAL'
+  );
+  const skateStoryIdx = indices.find(
+    (i) => collected[i - 1]?.section === 'SKATE'
+  );
+  if (localStoryIdx === undefined || skateStoryIdx === undefined) return indices;
+  if (localStoryIdx === skateStoryIdx) return indices;
+
+  const coreInOrder = indices.filter((i) => {
+    const s = collected[i - 1]?.section;
+    return s === 'TECH' || s === 'REPAIR' || s === 'HARDWARE';
+  });
+  if (coreInOrder.length + 2 !== indices.length) return indices;
+
+  const normalized = [localStoryIdx, ...coreInOrder, skateStoryIdx];
+  const before = indices.join(',');
+  const after = normalized.join(',');
+  if (before !== after) {
+    console.warn(
+      `SOURCES: normalized dual-culture order [${indices.join(', ')}] → [${normalized.join(', ')}]. ON AIR must open with Wolves and end news with skate (same order as <<<SOURCES>>>).`
+    );
+  }
+  return normalized;
+}
+
 function enforceSourceSectionCaps(
   indices: number[],
   collected: Collected[],
@@ -1302,6 +1340,11 @@ async function runNewsAgent() {
   const shouldRequireSkateBeat =
     cultureMode !== 'LOCAL' && hasSkate && !skateBeatRecentlyAired;
 
+  const dualCultureStrictReminder =
+    hasWolves && hasSkate
+      ? `- **Wolves + skate together (hard validator shape):** If your five picks include **both** one **[LOCAL]** Timberwolves story **and** one **[SKATE]** story, **<<<SOURCES>>>** **must** list **five numbers** in this shape only: **LOCAL first**, **three core** (**[REPAIR]**/**[TECH]**/**[HARDWARE]** only) in the middle, **[SKATE] last** — example pattern \`12,3,5,7,18\` means story **12** is **[LOCAL]**, stories **3,5,7** are core, **18** is **[SKATE]**. **ON AIR** must deliver beats in that **exact** sequence after START (Wolves beat → three core beats → skate beat → neighborhood close). Listing skate before Wolves or putting either culture slot between core beats **fails validation**.`
+      : '';
+
   const cultureRule =
     cultureMode === 'SKATE'
       ? '- **Culture slot (forced):** Include **one [SKATE]** beat (when any skate item exists). **Do not** include **[LOCAL]** Timberwolves on this run.'
@@ -1366,6 +1409,7 @@ ${storyListText}
 
 QUALITY RULES:
 ${storyPickRule}
+${dualCultureStrictReminder}
 - **Recency (critical):** The list is **pre-filtered** for freshness (**~18 hours** per section by default). Treat everything as **today’s desk** — not “yesterday” or “overnight” unless the item’s date is clearly **today** in US **Central**. Skip stale vibes, republished “classics,” and year-stamped reruns unless the headline proves it’s **new today**. If a headline includes “(2024)” or an old year, it is usually **not** breaking — either skip or frame as “making the rounds again,” not fresh news.
 - Do not invent products, prices, or dates. Stay close to the headlines.
 - **Digital money / chains:** The show is **Bitcoin-only**. Do **not** cover altcoins, stablecoins, NFT/DeFi/Web3 industry, or generic **“crypto”** as an asset class. **Do** cover **Bitcoin** when a sourced headline is clearly about Bitcoin (ETFs, adoption, mining, Lightning, regulation aimed at Bitcoin, etc.). On air, avoid saying **“crypto”** as a bucket — say **Bitcoin** or neutral tech wording.
@@ -1401,7 +1445,7 @@ ${localColorBlock}
 (ALL CAPS — one take, **~80-90s** with **~150-195 words** between START and END; same order as SOURCES; **must** include **${localBizName}** once in the close before **BACK TO THE SOLDERING IRON**.)
 
 <<<SOURCES>>>
-(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`2,5,7,9,11\` = story **2**, then **5**, then **7**, then **9**, then **11**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **[LOCAL]** / **[SKATE]** must be **first or last** in this comma list (last = usual, before the neighborhood close; first = only if you **open** with that beat). **Never** place culture/sports **between** two tech/repair picks — no tech after your Wolves/skate beat except the close.)
+(Exactly **one line**: comma-separated **1-based story numbers** from **NUMBERED STORIES FOR TODAY** — **exactly ${TARGET_SOURCE_STORIES} numbers**. E.g. \`2,5,7,9,11\` = story **2**, then **5**, then **7**, then **9**, then **11**. **Order = slide order** = JPEG order in the email = **the exact sequence of news beats in COLUMN B (ON AIR)** — first story you speak → first number, second beat → second number, and so on. Do **not** sort or group by section; if the numbered list has Heathkit as **3** and iPhone as **4** but you speak iPhone before Heathkit, emit **4** before **3** in this line. **Single culture:** **[LOCAL]** or **[SKATE]** must be **first or last** in this comma list (usually **last** before the neighborhood close). **Never** sandwich culture **between** two core beats. **Both Wolves and skate in the same episode:** **[LOCAL] number must be first**, **[SKATE] number must be last**, three **[REPAIR]/[TECH]/[HARDWARE]** numbers in the middle — ON AIR must match that spoken order (Wolves → core → core → core → skate → close).)
 
 <<<SOCIAL>>>
 (**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**. Write **properly**: clean grammar, real sentences (no fragments), correct capitalization (no random lowercase “i”), and normal punctuation. **Write in sentence case** (normal Facebook / Instagram style): capitalize the first word and proper nouns only. **Do not** use ALL CAPS, title case for the whole paragraph, or fake emphasis — platforms flag shouty text as low quality. Standard tech spellings are fine (OpenAI, iPhone, GPU). No “link in bio,” no explaining screenshots. 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler.)
@@ -1552,6 +1596,7 @@ ${localColorBlock}
       shouldRequireSkateBeat
     );
     indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
+    indices = normalizeDualCultureSourceOrder(indices, collected);
     finalSegments = buildFinalSegments(indices, collected);
     const programmaticSourceFillIns = indices.filter(
       (i) => !uniqParsed.includes(i)
