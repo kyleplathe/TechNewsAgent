@@ -102,10 +102,37 @@ export async function parseFeedUrl(feedUrl: string): Promise<ParsedFeed> {
   }
 
   const ms = feedFetchTimeoutMs();
-  const res = await fetch(u.href, {
-    signal: AbortSignal.timeout(ms),
-    headers: feedFetchHeaders(feedUrl),
-  });
+
+  async function tryFetch(href: string): Promise<Response> {
+    return fetch(href, {
+      signal: AbortSignal.timeout(ms),
+      headers: feedFetchHeaders(href),
+    });
+  }
+
+  let res = await tryFetch(u.href);
+  // Substack sometimes serves `/feed` as 403 from datacenter IPs while `/feed.xml` works (or vice versa).
+  const isSubstack =
+    u.hostname === 'substack.com' || u.hostname.endsWith('.substack.com');
+  if (!res.ok && res.status === 403 && isSubstack) {
+    const origin = u.origin;
+    const path = u.pathname.replace(/\/+$/, '') || '';
+    const alts: string[] = [];
+    if (/\/feed$/i.test(path)) {
+      alts.push(`${origin}/feed.xml`, `${origin}/rss.xml`);
+    } else if (path === '' || path === '/') {
+      alts.push(`${origin}/feed.xml`, `${origin}/feed`);
+    }
+    for (const alt of alts) {
+      if (alt === u.href) continue;
+      const r2 = await tryFetch(alt);
+      if (r2.ok) {
+        res = r2;
+        break;
+      }
+    }
+  }
+
   if (!res.ok) {
     throw new Error(`Feed HTTP ${res.status}: ${u.href}`);
   }

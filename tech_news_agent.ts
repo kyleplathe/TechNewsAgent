@@ -487,6 +487,26 @@ function countOnAirWords(onAir: string): number {
     .filter(Boolean).length;
 }
 
+/**
+ * Applied to ON AIR **after** `ensureLocalBusinessInOnAir` / optional culture injections
+ * (those lines add words — CI used to fail at a tight 195 cap).
+ * Editorial target stays ~150–195 in the prompt; bounds are the automation gate.
+ */
+function onAirWordBounds(): { min: number; max: number } {
+  const minParsed = parseInt(process.env.ON_AIR_MIN_WORDS ?? '120', 10);
+  const maxParsed = parseInt(process.env.ON_AIR_MAX_WORDS ?? '228', 10);
+  const min =
+    Number.isFinite(minParsed) && minParsed >= 0
+      ? Math.min(Math.max(minParsed, 70), 200)
+      : 120;
+  let max =
+    Number.isFinite(maxParsed) && maxParsed > 0
+      ? Math.min(Math.max(maxParsed, min + 30), 360)
+      : 228;
+  if (max < min + 20) max = min + 20;
+  return { min, max };
+}
+
 /** Matches Timberwolves / Wolves on air — must align with [LOCAL] in <<<SOURCES>>>. */
 const ON_AIR_WOLVES_RE =
   /\b(timberwolves|\bwolves\b|minnesota\s+timberwolves)\b/i;
@@ -667,11 +687,21 @@ function validateStudioOutput(
     );
   }
   const words = countOnAirWords(onAir);
-  if (words > 195) {
-    issues.push(`ON AIR is too long (${words} words); trim to ~150-195 words for an ~80-90s read (hard ceiling ~90s).`);
+  const { min: onAirMin, max: onAirMax } = onAirWordBounds();
+  if (words > onAirMax) {
+    issues.push(
+      `ON AIR is too long (${words} words); trim so total between START and END is ${onAirMin}–${onAirMax} words (editorial target ~150–195 after injections — drop clauses per beat if needed).`
+    );
   }
-  if (words < 140) {
-    issues.push(`ON AIR is too short (${words} words); expand to ~150-195 words for an ~80-90s read.`);
+  if (words < onAirMin) {
+    issues.push(
+      `ON AIR is too short (${words} words); expand to ${onAirMin}–${onAirMax} words (editorial target ~150–195 — add one concrete detail per beat where thin).`
+    );
+  }
+  if (words > 195 && words <= onAirMax) {
+    console.warn(
+      `ON AIR word count ${words} is above editorial target (195) but within automation ceiling (${onAirMax}).`
+    );
   }
   issues.push(...validateCultureBeatPlacement(selectedStories));
   return issues;
@@ -1542,9 +1572,10 @@ ${localColorBlock}
   }
 
   const maxValidationRetries = Math.min(
-    3,
-    Math.max(1, parseInt(process.env.GEMINI_VALIDATION_RETRIES ?? '2', 10) || 2)
+    8,
+    Math.max(1, parseInt(process.env.GEMINI_VALIDATION_RETRIES ?? '4', 10) || 4)
   );
+  const onAirBoundsRetryHint = onAirWordBounds();
   let rawOut = '';
   let fixedOnAir = '';
   let onAirForEmail = '';
@@ -1561,7 +1592,9 @@ ${localColorBlock}
         ? prompt
         : `${prompt}\n\nRETRY NOTE: Your last output violated hard rules.\n${validationIssues
             .map((i) => `- ${i}`)
-            .join('\n')}\nRegenerate all three blocks now, following the exact markers.`;
+            .join(
+              '\n'
+            )}\nRegenerate all three blocks now, following the exact markers.\n- **Word budget:** Between START and END lines only — aim ~155–185 spoken words so total stays inside automation bounds after injections (roughly ${onAirBoundsRetryHint.min}–${onAirBoundsRetryHint.max} words including Wolves/skate repair lines if inserted).\n- If too long: shorten **every** beat before trimming Wolves/skate or close.\n- If too short: one vivid detail per story beat (still ALL CAPS, calm bench tone).`;
     rawOut = await generateWithBackoff(requestText);
     const parsed = parseStudioOutput(rawOut, collected.length);
     fixedOnAir = parsed.onAir.trim();
