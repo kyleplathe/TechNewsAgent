@@ -8,9 +8,10 @@ export type LocalBusiness = {
 
 /**
  * Daily rotation + storefront URLs for Playwright local-spotlight grabs.
+ * Full Linden Hills Neighborhood Council directory (all sections used for listings, except elected Representatives).
  * Source of truth: https://www.lindenhills.org/directory
  */
-const BUSINESSES_43RD_UPTON: LocalBusiness[] = [
+const LINDEN_HILLS_DIRECTORY_BUSINESSES: LocalBusiness[] = [
   {
     name: 'Caphin Minneapolis',
     category: 'Food & Beverage',
@@ -209,6 +210,7 @@ const BUSINESSES_43RD_UPTON: LocalBusiness[] = [
     name: 'Instakyle Tech Solutions LLC',
     category: 'Other Retail',
     description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://instakyle.tech/',
     tags: ['other-retail', 'linden-hills'],
   },
   {
@@ -589,6 +591,289 @@ const BUSINESSES_43RD_UPTON: LocalBusiness[] = [
     description: 'Listed in the Linden Hills Neighborhood Council directory.',
     tags: ['services', 'linden-hills'],
   },
+  {
+    name: 'Bde Maka Ska Park',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website:
+      'https://www.minneapolisparks.org/parks-destinations/parks-lakes/bde_maka_ska_park/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Bde Maka Ska Thomas Beach',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website:
+      'https://www.minneapolisparks.org/activities-events/water-activities/beaches/bde_maka_ska_thomas_beach/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: "Beard's Plaisance",
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website:
+      'https://www.minneapolisparks.org/parks-destinations/parks-lakes/beards_plaisance/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Como-Harriet Streetcar Line',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://trolleyride.org/como-harriet-streetcar/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Lake Harriet Park & Bandshell',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website:
+      'https://www.minneapolisparks.org/parks-destinations/parks-lakes/lake_harriet_park/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Lake Harriet North Beach',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website:
+      'https://www.minneapolisparks.org/activities-events/water-activities/beaches/lake_harriet_north_beach/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Lake Harriet Yacht Club',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://lhycsailing.com/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Linden Hills Park & Recreation Center',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website:
+      'https://www.minneapolisparks.org/parks-destinations/parks-lakes/linden_hills_park/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Roberts Bird Sanctuary',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website:
+      'https://www.minneapolisparks.org/parks-destinations/parks-lakes/roberts_bird_sanctuary/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Twin Cities Sailing Club',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://tcsailing.org/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Waveland Triangle',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website:
+      'https://www.minneapolisparks.org/parks-destinations/parks-lakes/triangles__other_tiny_parks/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Wheel Fun Rentals - Lake Harriet',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://wheelfunrentals.com/mn/minneapolis/lake-harriet/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'William Berry Park',
+    category: 'Recreation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website:
+      'https://www.minneapolisparks.org/parks-destinations/parks-lakes/william_berry_park/',
+    tags: ['recreation', 'linden-hills'],
+  },
+  {
+    name: 'Freemasons of Lake Harriet Lodge',
+    category: 'Faith & Spirituality',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.lakeharrietlodge.org/',
+    tags: ['faith-spirituality', 'linden-hills'],
+  },
+  {
+    name: 'Lake Harriet Spiritual Community',
+    category: 'Faith & Spirituality',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://lakeharrietspiritualcommunity.org/',
+    tags: ['faith-spirituality', 'linden-hills'],
+  },
+  {
+    name: 'Minneapolis Friends Meeting (Quakers)',
+    category: 'Faith & Spirituality',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://minneapolisfriends.org/',
+    tags: ['faith-spirituality', 'linden-hills'],
+  },
+  {
+    name: "St. John's Episcopal Church",
+    category: 'Faith & Spirituality',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://stjohns-mpls.org/',
+    tags: ['faith-spirituality', 'linden-hills'],
+  },
+  {
+    name: 'St. Thomas the Apostle',
+    category: 'Faith & Spirituality',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.stthomasmpls.org/',
+    tags: ['faith-spirituality', 'linden-hills'],
+  },
+  {
+    name: 'Third Church of Christ, Scientist',
+    category: 'Faith & Spirituality',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://thirdchurchminneapolis.org/',
+    tags: ['faith-spirituality', 'linden-hills'],
+  },
+  {
+    name: 'True Apostolic Assembly',
+    category: 'Faith & Spirituality',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    tags: ['faith-spirituality', 'linden-hills'],
+  },
+  {
+    name: 'Lake Harriet Community Schools',
+    category: 'Education & Childcare',
+    description:
+      'Listed in the Linden Hills Neighborhood Council directory (lower and upper campuses).',
+    website: 'https://lakeharriet.mpschools.org/',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Anthony Middle School',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://anthony.mpschools.org/',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Southwest High School',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://southwest.mpschools.org/',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Carondelet Catholic School',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.carondelet-mpls.org/',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'The Forest School of Minnesota',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.forestschoolmn.org/',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Girasol Montessori School',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.girasolmontessorimn.com/',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Linden Hills Child Care',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'http://www.lindenhillschildcare.com/',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Minneapolis Kids',
+    category: 'Education & Childcare',
+    description:
+      'Listed in the Linden Hills Neighborhood Council directory (before & after school, summer, and non-school day programming).',
+    website: 'https://ce.mpschools.org/youth/mpls-kids',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Minneapolis Kids Jr at Lake Harriet Lower',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://ce.mpschools.org/youth/mpls-kids/mpls-kids-jr',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Southwest KinderCare',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Linden Hills Library',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.hclib.org/about/locations/linden-hills/',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Minneapolis Community Education',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://ce.mpschools.org/',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Linden Hills Recreation Center',
+    category: 'Education & Childcare',
+    description:
+      'Listed in the Linden Hills Neighborhood Council directory (programs; same campus as neighborhood recreation center).',
+    website:
+      'https://anc.apm.activecommunities.com/mplsparkandrec/activity/search?onlineSiteId=0&activity_select_param=2&center_ids=27&viewMode=list',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'rit. Learning & Consulting & grrit.y kids podcast',
+    category: 'Education & Childcare',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.ritlearns.com/',
+    tags: ['education-and-childcare', 'linden-hills'],
+  },
+  {
+    name: 'Metro Transit',
+    category: 'Transportation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.metrotransit.org/',
+    tags: ['transportation', 'linden-hills'],
+  },
+  {
+    name: 'Metro Mobility',
+    category: 'Transportation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.metrotransit.org/metro-mobility',
+    tags: ['transportation', 'linden-hills'],
+  },
+  {
+    name: 'Bicycling (City of Minneapolis)',
+    category: 'Transportation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.minneapolismn.gov/getting-around/bicycles/',
+    tags: ['transportation', 'linden-hills'],
+  },
+  {
+    name: 'Scooters (City of Minneapolis)',
+    category: 'Transportation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    website: 'https://www.minneapolismn.gov/getting-around/scooters/',
+    tags: ['transportation', 'linden-hills'],
+  },
+  {
+    name: 'Rideshare & Taxis',
+    category: 'Transportation',
+    description: 'Listed in the Linden Hills Neighborhood Council directory.',
+    tags: ['transportation', 'linden-hills'],
+  },
 ];
 
 /** Stable daily rotation so the plug doesn’t repeat too often. */
@@ -613,9 +898,13 @@ export function pickLocalBusiness(): LocalBusiness {
   const start = Date.UTC(y, 0, 1);
   const dayOfYear = Math.floor((Date.UTC(y, m, d) - start) / 86_400_000);
   /** Prefer directory entries with a storefront URL so email / bundle artifacts always get a Local Spotlight link when possible. */
-  const pool = BUSINESSES_43RD_UPTON.filter((b) => b.website?.trim()) as LocalBusiness[];
+  const pool = LINDEN_HILLS_DIRECTORY_BUSINESSES.filter((b) =>
+    b.website?.trim()
+  ) as LocalBusiness[];
   const rotation =
-    pool.length > 0 ? pool : (BUSINESSES_43RD_UPTON as LocalBusiness[]);
+    pool.length > 0
+      ? pool
+      : (LINDEN_HILLS_DIRECTORY_BUSINESSES as LocalBusiness[]);
   const idx =
     ((dayOfYear % rotation.length) + rotation.length) % rotation.length;
   return rotation[idx]!;
