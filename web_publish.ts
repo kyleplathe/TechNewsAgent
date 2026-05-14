@@ -24,7 +24,7 @@ export type WebPublishStoryInput = {
   section: string;
   title: string;
   link: string;
-  /** RSS / Atom `pubDate` — used when `TECHNEWS_BLOG_STORY_ORDER=newest` (opt-in). */
+  /** RSS / Atom `pubDate` when available (metadata only; blog order follows the script). */
   publishedAt?: string;
   /** JPEG filename (e.g. 01-slug.jpg) when a screenshot exists for this story */
   imageFilename?: string;
@@ -226,25 +226,26 @@ function joinUrl(base: string, rel: string): string {
   return `${b}/${r}`;
 }
 
-/** Default **script** order (`<<<SOURCES>>>`); set `TECHNEWS_BLOG_STORY_ORDER=newest` for date order. */
-function blogStoryOrderMode(): 'newest' | 'script' {
-  const v = process.env.TECHNEWS_BLOG_STORY_ORDER?.trim().toLowerCase();
-  if (v === 'newest' || v === 'date' || v === 'published') return 'newest';
-  return 'script';
-}
-
-function sortStoriesForBlogOrder(
-  stories: WebPublishStoryInput[],
-  mode: 'newest' | 'script'
-): WebPublishStoryInput[] {
-  if (mode === 'script' || stories.length <= 1) return [...stories];
-  return [...stories].sort((a, b) => {
-    const ta = a.publishedAt ? Date.parse(a.publishedAt) : NaN;
-    const tb = b.publishedAt ? Date.parse(b.publishedAt) : NaN;
-    const taN = Number.isFinite(ta) ? ta : Number.NEGATIVE_INFINITY;
-    const tbN = Number.isFinite(tb) ? tb : Number.NEGATIVE_INFINITY;
-    return tbN - taN;
-  });
+/**
+ * Ensure consumers that sort by `segmentOrder` see the same sequence as JSON array order
+ * (teleprompter beats first, Local Spotlight last).
+ */
+function normalizeStoryPayloadRows<
+  T extends { storyIndex: number; segmentOrder: number },
+>(rows: T[]): T[] {
+  const spotlight = rows.filter((r) => r.storyIndex === 99);
+  const main = rows.filter((r) => r.storyIndex !== 99);
+  const sorted = [...main].sort((a, b) => a.segmentOrder - b.segmentOrder);
+  const misaligned = main.some((r, i) => r !== sorted[i]);
+  if (misaligned) {
+    console.warn(
+      'WEB: story rows were not in segmentOrder; normalizing array + segmentOrder to teleprompter sequence.'
+    );
+  }
+  const mainOut = sorted.map((row, i) => ({ ...row, segmentOrder: i + 1 }));
+  if (!spotlight.length) return mainOut;
+  const seg = mainOut.length + 1;
+  return [...mainOut, ...spotlight.map((s) => ({ ...s, segmentOrder: seg }))];
 }
 
 /**
@@ -480,13 +481,8 @@ export async function writeTechNewsWebBundle(
     throw new Error('writeTechNewsWebBundle: set outDir and/or instakyleNewsDir');
   }
 
-  const blogOrder = blogStoryOrderMode();
-  const storiesOrdered = sortStoriesForBlogOrder(stories, blogOrder);
-  if (blogOrder === 'newest' && stories.length > 1) {
-    console.warn(
-      'WEB: TECHNEWS_BLOG_STORY_ORDER=newest — rows sorted by RSS pub date (often misaligns with the teleprompter). Unset or set TECHNEWS_BLOG_STORY_ORDER=script for <<<SOURCES>>> / VO order.'
-    );
-  }
+  // Same order as email / <<<SOURCES>>> / teleprompter (never RSS-sorted).
+  const storiesOrdered = [...stories];
 
   const sections = parseVideoPromptStorySections(videoPrompt);
   if (sections.length !== storiesOrdered.length && storiesOrdered.length > 0) {
@@ -656,6 +652,9 @@ export async function writeTechNewsWebBundle(
       });
     }
 
+    const payloadStoriesOrdered =
+      normalizeStoryPayloadRows(payloadStories);
+
     const runMeta = workflowRunMeta();
     const payload: TechNewsWebPayload = {
       schemaVersion: 1,
@@ -672,7 +671,7 @@ export async function writeTechNewsWebBundle(
       socialCaption,
       videoPrompt,
       onAirPlain,
-      stories: payloadStories,
+      stories: payloadStoriesOrdered,
     };
 
     await writeFile(
@@ -767,6 +766,7 @@ export async function writeTechNewsWebBundle(
         imageUrl: localSpotlightInstakyle.imageUrl,
       });
     }
+    const postStoriesOrdered = normalizeStoryPayloadRows(postStories);
     const mergedPostVideo =
       (videoUrl && videoUrl.trim()) || prevPost?.videoUrl || null;
     const mergedPostYoutubeId =
@@ -789,7 +789,7 @@ export async function writeTechNewsWebBundle(
       socialCaption,
       videoPrompt,
       onAirPlain,
-      stories: postStories,
+      stories: postStoriesOrdered,
     };
 
     await writeFile(postPath, JSON.stringify(postPayload, null, 2), 'utf8');

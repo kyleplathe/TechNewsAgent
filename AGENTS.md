@@ -33,11 +33,11 @@ Markers in model output: `<<<ON_AIR>>>`, `<<<SOURCES>>>` (one line of comma-sepa
 
 **SOURCE LINKS / email JPEG order (default):** indices follow the model’s **`<<<SOURCES>>>`** line (same order as slide / VO beats). Set **`USE_ON_AIR_SOURCE_REORDER=1`** to re-sort by hostname/title hits in **`<<<ON_AIR>>>`** (legacy heuristic).
 
-**Blog / Instakyle story rows (default):** **`TECHNEWS_BLOG_STORY_ORDER=script`** — stories follow email / `<<<SOURCES>>>` order (keeps `VIDEO PROMPT` story blocks aligned 1:1). Set **`TECHNEWS_BLOG_STORY_ORDER=newest`** for newest-first by feed date (can reorder vs. the teleprompter — e.g. Wolves URL jumping to the top). Post JSON includes **`segmentOrder`** (1-based VO position) and **`storyIndex`** (daily feed pool # for screenshots); **sort the UI by `segmentOrder` or JSON array order, not by `storyIndex`.** When building web rows, each story’s **`storyIndex`** must stay paired with its feed row (do not zip against `<<<SOURCES>>>` indices after dropping items with empty URLs — that misaligned screenshots vs. links on `/news`).
+**Blog / Instakyle story rows:** Always the same order as the email and **`<<<SOURCES>>>`** / teleprompter (keeps `VIDEO PROMPT` **STORY** blocks aligned 1:1). Post JSON includes **`segmentOrder`** (1-based VO position) and **`storyIndex`** (daily feed pool # for screenshots); **sort the UI by `segmentOrder` or JSON array order, not by `storyIndex`.** When building web rows, each story’s **`storyIndex`** must stay paired with its feed row (do not zip against `<<<SOURCES>>>` indices after dropping items with empty URLs — that misaligned screenshots vs. links on `/news`).
 
 Post JSON includes **`seoKeywords`** (neighborhood + business + story tokens) and optional **`localSpotlight`** (**Local Spotlight** — business URL + screenshot) when `LOCAL_BIZ_WEBSITE` or the rotation entry has a **`website`** URL.
 
-The **daily email** also includes a **Local spotlight** block (name + URL + **`99-local-spotlight.jpg`** after story grabs — use it last in the slide deck) and **injects** the business name into **ON AIR** if Gemini omitted it. Each rotation entry in **`local_businesses.ts`** should have a **`website`** (see `docs/linden-hills-43rd-upton/README.md`); **`LOCAL_BIZ_WEBSITE`** (repo var / `.env`) overrides when set. If the first capture fails, the agent retries once with **desktop** layout (`SCREENSHOT_MOBILE=0`).
+The **daily email** also includes a **Local spotlight** block (name + URL + **`99-local-spotlight.jpg`** after story grabs — use it last in the slide deck) and **injects** the business name into **ON AIR** if Gemini omitted it. Each rotation entry in **`local_businesses.ts`** should have a **`website`** (see `docs/linden-hills-43rd-upton/README.md`); **`LOCAL_BIZ_WEBSITE`** (repo var / `.env`) overrides when set. If the first capture fails, the agent retries once with **desktop** layout (`SCREENSHOT_MOBILE=0`). **Rotation:** default **`LOCAL_BIZ_ROTATION_POOL=all`** cycles the full directory (spotlight JPEG only when that row has a URL); set **`LOCAL_BIZ_ROTATION_POOL=websites`** to limit picks to URL rows only (legacy). Default **`LOCAL_BIZ_ROTATION_ORDER=shuffled`** uses a year-seeded deterministic shuffle so consecutive calendar days are not always consecutive directory rows; **`list`** restores strict directory order by day-of-year.
 
 If the email looks truncated or missing a column, check Gemini `maxOutputTokens` and API errors; markers must be exact.
 
@@ -94,7 +94,7 @@ Local (auto-discover by token): `YOUTUBE_API_KEY=... npm run youtube:sync -- --n
 
 ## Secrets / env
 
-Resend, Gemini, `RESEND_TO`, optional `FEED_ITEM_LIMIT`, `SCREENSHOT_*`, `GEMINI_MODEL`, optional `USE_ON_AIR_SOURCE_REORDER`, `TECHNEWS_BLOG_STORY_ORDER`, `LOCAL_BIZ_WEBSITE`, etc. Never commit `.env`.
+Resend, Gemini, `RESEND_TO`, optional `FEED_ITEM_LIMIT`, `SCREENSHOT_*`, `GEMINI_MODEL`, optional `USE_ON_AIR_SOURCE_REORDER`, `LOCAL_BIZ_WEBSITE`, etc. Never commit `.env`.
 
 ### Culture slot override (Skate vs Timberwolves)
 

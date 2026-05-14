@@ -1,3 +1,5 @@
+import { getChicagoEpisodeNow } from './web_publish';
+
 export type LocalBusiness = {
   name: string;
   category: string;
@@ -5,6 +7,31 @@ export type LocalBusiness = {
   website?: string;
   tags: string[];
 };
+
+/** Deterministic PRNG for stable per-year shuffles (same Chicago day → same pick on rerun). */
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  if (state === 0) state = 0x9e3779b9;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(state ^ (state >>> 15), state | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleDeterministic<T>(items: readonly T[], seed: number): T[] {
+  const out = items.slice();
+  const rand = mulberry32(seed);
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const a = out[i]!;
+    const b = out[j]!;
+    out[i] = b;
+    out[j] = a;
+  }
+  return out;
+}
 
 /**
  * Daily rotation + storefront URLs for Playwright local-spotlight grabs.
@@ -876,35 +903,58 @@ const LINDEN_HILLS_DIRECTORY_BUSINESSES: LocalBusiness[] = [
   },
 ];
 
-/** Stable daily rotation so the plug doesn’t repeat too often. */
+/**
+ * Daily pick for the neighborhood business + Local Spotlight URL (when `website` exists).
+ *
+ * - **Order:** `LOCAL_BIZ_ROTATION_ORDER` — `shuffled` (default): Fisher–Yates order fixed per
+ *   Chicago year so directory neighbors (e.g. two Bde Maka Ska rows) are not back-to-back days;
+ *   `list` = legacy strict directory order by `dayOfYear % N`.
+ * - **Pool:** `LOCAL_BIZ_ROTATION_POOL` — `all` (default): every directory row participates in
+ *   the cycle (no spotlight JPEG when that row has no `website`); `websites` = only rows with a
+ *   URL (legacy, maximizes spotlight grabs).
+ *
+ * Uses `getChicagoEpisodeNow()` so **`TECHNEWS_CHICAGO_DATE`** backfills match the episode slug day.
+ */
 export function pickLocalBusiness(): LocalBusiness {
-  const now = new Date();
+  const ref = getChicagoEpisodeNow();
   const chicagoParts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Chicago',
     year: 'numeric',
     month: 'numeric',
     day: 'numeric',
   })
-    .formatToParts(now)
+    .formatToParts(ref)
     .reduce<Record<string, number>>((acc, part) => {
       if (part.type === 'year' || part.type === 'month' || part.type === 'day') {
         acc[part.type] = parseInt(part.value, 10);
       }
       return acc;
     }, {});
-  const y = chicagoParts.year ?? now.getUTCFullYear();
+  const y = chicagoParts.year ?? ref.getUTCFullYear();
   const m = (chicagoParts.month ?? 1) - 1;
   const d = chicagoParts.day ?? 1;
   const start = Date.UTC(y, 0, 1);
   const dayOfYear = Math.floor((Date.UTC(y, m, d) - start) / 86_400_000);
-  /** Prefer directory entries with a storefront URL so email / bundle artifacts always get a Local Spotlight link when possible. */
-  const pool = LINDEN_HILLS_DIRECTORY_BUSINESSES.filter((b) =>
+
+  const poolMode = (process.env.LOCAL_BIZ_ROTATION_POOL ?? 'all').trim().toLowerCase();
+  const withWebsites = LINDEN_HILLS_DIRECTORY_BUSINESSES.filter((b) =>
     b.website?.trim()
   ) as LocalBusiness[];
-  const rotation =
-    pool.length > 0
-      ? pool
+  const baseList: LocalBusiness[] =
+    poolMode === 'websites' && withWebsites.length > 0
+      ? withWebsites
       : (LINDEN_HILLS_DIRECTORY_BUSINESSES as LocalBusiness[]);
+
+  const orderMode = (process.env.LOCAL_BIZ_ROTATION_ORDER ?? 'shuffled')
+    .trim()
+    .toLowerCase();
+  const shuffleSeed =
+    (y * 1_000_003 + baseList.length * 97_981) >>> 0;
+  const rotation =
+    orderMode === 'list'
+      ? baseList
+      : shuffleDeterministic(baseList, shuffleSeed);
+
   const idx =
     ((dayOfYear % rotation.length) + rotation.length) % rotation.length;
   return rotation[idx]!;
