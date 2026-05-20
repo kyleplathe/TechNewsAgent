@@ -491,6 +491,34 @@ function insertBeforeSolderingSignOff(onAir: string, paragraph: string): string 
   return `${t}\n\n${insert}`;
 }
 
+const ON_AIR_OPEN_LINE_RE =
+  /^LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE\. AND WE'VE GOT A LOT HITTING THE SHOP TODAY\./im;
+
+/** Podcast-style runway the prompt bans — fail validation so Gemini retries. */
+const ON_AIR_BANNED_PADDING_RES: Array<{ re: RegExp; label: string }> = [
+  { re: /\bFIRST UP\b/i, label: '“FIRST UP”' },
+  { re: /\bMEANWHILE\b/i, label: '“MEANWHILE”' },
+  { re: /\bON THE HARDWARE FRONT\b/i, label: '“ON THE HARDWARE FRONT”' },
+  { re: /\bSPEAKING OF HARDWARE\b/i, label: '“SPEAKING OF HARDWARE”' },
+  { re: /\bTHAT'S THE TECH WRAP\b/i, label: '"THAT\'S THE TECH WRAP"' },
+  { re: /\bNEXT UP\b/i, label: '"NEXT UP"' },
+  { re: /\bFINALLY\b,/i, label: '"FINALLY,"' },
+  { re: /\bWRAPPING UP\b/i, label: '"WRAPPING UP"' },
+  { re: /\bLET'S UNPACK\b/i, label: '"LET\'S UNPACK"' },
+];
+
+function validateBannedOnAirPadding(onAir: string): string[] {
+  const issues: string[] = [];
+  for (const { re, label } of ON_AIR_BANNED_PADDING_RES) {
+    if (re.test(onAir)) {
+      issues.push(
+        `ON AIR uses banned transition padding ${label} — cut runway phrases; go straight from beat to beat.`
+      );
+    }
+  }
+  return issues;
+}
+
 /**
  * Missing sports VO lines belong **before** the Linden Hills / business close, not after sign-off.
  */
@@ -504,10 +532,14 @@ function insertBeforeNeighborhoodClose(
   if (!insert) return t;
 
   let cut = -1;
-  const lindenIdx = t.search(/\bLINDEN HILLS\b/i);
+  const openMatch = t.match(ON_AIR_OPEN_LINE_RE);
+  const bodyStart = openMatch?.index !== undefined ? openMatch.index + openMatch[0].length : 0;
+  const body = t.slice(bodyStart);
+  const lindenIdx = body.search(/\bLINDEN HILLS\b/i);
   if (lindenIdx >= 0) {
-    cut = t.lastIndexOf('\n\n', lindenIdx);
-    if (cut < 0) cut = 0;
+    const absIdx = bodyStart + lindenIdx;
+    cut = t.lastIndexOf('\n\n', absIdx);
+    if (cut < bodyStart) cut = bodyStart;
   } else {
     const bn = bizName.trim();
     if (bn.length >= 3) {
@@ -743,13 +775,21 @@ function validateStudioOutput(
   localBizName: string,
   selectedStories: Collected[],
   shouldRequireSkateBeat: boolean,
-  cultureMode: CultureSectionMode
+  cultureMode: CultureSectionMode,
+  /** Raw model ON AIR (before culture auto-repair) — sports beats must be written here, not injected. */
+  modelOnAir?: string
 ): string[] {
+  const modelText = (modelOnAir ?? onAir).trim();
   const issues: string[] = [];
   const sourceCount = indices.length;
   if (sourceCount !== TARGET_SOURCE_STORIES) {
     issues.push(
       `SOURCES must include exactly ${TARGET_SOURCE_STORIES} story numbers; got ${sourceCount}.`
+    );
+  }
+  if (sourceCount > 0 && selectedStories.length !== sourceCount) {
+    issues.push(
+      `Resolved ${selectedStories.length} sourced row(s) from ${sourceCount} indices — each index must map to a collected item with a non-empty link (otherwise email/blog rows desync).`
     );
   }
   const localCount = selectedStories.filter((s) => s.section === 'LOCAL').length;
@@ -782,29 +822,29 @@ function validateStudioOutput(
   if (
     shouldRequireSkateBeat &&
     !hasSkateSelected &&
-    !onAirReferencesWolvesBeat(onAir)
+    !onAirReferencesWolvesBeat(modelText)
   ) {
     issues.push(
       'Skate cadence rule: include one SKATE story in SOURCES this run (waived when ON AIR references Wolves — keep [LOCAL] only).'
     );
   }
   // Bidirectional section lock: SOURCES ↔ ON AIR (avoid Wolves URL with no VO line, or VO skate with no URL).
-  if (!hasWolvesSelected && onAirReferencesWolvesBeat(onAir)) {
+  if (!hasWolvesSelected && onAirReferencesWolvesBeat(modelText)) {
     issues.push('ON AIR mentions Wolves but SOURCES does not include a LOCAL story.');
   }
-  if (!hasSkateSelected && onAirReferencesSkateBeat(onAir)) {
+  if (!hasSkateSelected && onAirReferencesSkateBeat(modelText)) {
     issues.push(
       'ON AIR covers a skate beat but SOURCES does not include a SKATE story — add that number or remove the skate copy.'
     );
   }
-  if (hasWolvesSelected && !onAirReferencesWolvesBeat(onAir)) {
+  if (hasWolvesSelected && !onAirReferencesWolvesBeat(modelText)) {
     issues.push(
       'SOURCES includes [LOCAL] (Timberwolves) but ON AIR does not mention Wolves — cover that pick or replace it in <<<SOURCES>>>.'
     );
   }
-  if (hasSkateSelected && !onAirReferencesSkateBeat(onAir)) {
+  if (hasSkateSelected && !onAirReferencesSkateBeat(modelText)) {
     issues.push(
-      'SOURCES includes [SKATE] but ON AIR does not cover the skate beat — mention skateboarding or the headline (e.g. Thrasher), or drop [SKATE] from <<<SOURCES>>>.'
+      'SOURCES includes [SKATE] but ON AIR does not cover the skate beat — write one spoken sentence (say skate/skateboarding or the outlet, e.g. Thrasher); a label-only “SKATEBOARDING BEAT —” header does not count.'
     );
   }
   if (/\blake street\b/i.test(onAir)) {
@@ -814,12 +854,19 @@ function validateStudioOutput(
     issues.push('ON AIR must not mention Lynx.');
   }
   const paraBlocks = countParagraphBlocksBeforeSignoff(onAir);
+  const maxAllowedParaBlocks = TARGET_SOURCE_STORIES + 2;
   if (paraBlocks < TARGET_SOURCE_STORIES) {
     issues.push(
       `ON AIR structure: use **one paragraph per <<<SOURCES>>> beat** (blank line between beats, another before the Linden Hills close). Found ${paraBlocks} paragraph block(s) before sign-off; need **at least ${TARGET_SOURCE_STORIES}** — do not merge multiple numbered picks into one “roundup” paragraph (even if they share a brand like Apple).`
     );
   }
+  if (paraBlocks > maxAllowedParaBlocks) {
+    issues.push(
+      `ON AIR structure: ${paraBlocks} paragraph block(s) before sign-off — max **${maxAllowedParaBlocks}** (${TARGET_SOURCE_STORIES} sourced beats + neighborhood close). Drop extra beats or merge padding; cover **only** <<<SOURCES>>> rows.`
+    );
+  }
   issues.push(...validateUnsourcedBrandMentions(onAir, selectedStories));
+  issues.push(...validateBannedOnAirPadding(onAir));
   issues.push(...validateStoryAnchorsInOnAir(onAir, selectedStories));
   const bizMentions = countBusinessMentions(onAir, localBizName);
   if (bizMentions !== 1) {
@@ -845,9 +892,16 @@ function validateStudioOutput(
       `ON AIR is too short (${words} words); expand to ${onAirMin}–${onAirMax} words (editorial target ~125–175 — add one concrete detail per beat where thin).`
     );
   }
-  if (words > 195 && words <= onAirMax) {
-    console.warn(
-      `ON AIR word count ${words} is above editorial target (195) but within automation ceiling (${onAirMax}).`
+  const editorialMax = Math.min(
+    onAirMax,
+    Math.max(
+      onAirMin + 40,
+      parseInt(process.env.ON_AIR_EDITORIAL_MAX_WORDS ?? '185', 10) || 185
+    )
+  );
+  if (words > editorialMax && words <= onAirMax) {
+    issues.push(
+      `ON AIR is wordy (${words} words); editorial target is ${onAirMin}–${editorialMax} between START and END — trim filler and one clause per beat before retrying.`
     );
   }
   issues.push(...validateCultureBeatPlacement(selectedStories));
@@ -1548,8 +1602,8 @@ ${storyPickRule}
 - **One pick = one beat (hard):** Each comma-separated number in **<<<SOURCES>>>** is a **different URL**. Give each pick **its own paragraph** with **at least one distinctive keyword from that headline** (product codename, regulator, app name, etc.). **Never** run three Apple items (or any brand) back-to-back inside **one** paragraph — that reads like one beat but corresponds to three slides / three links.
 - **Vendor fidelity:** Name **Meta**, **TSMC**, etc. **only** when that exact sourced headline is about them (same numbered row). No drive-by chip-industry color unless one of your four picks is that story.
 - **Paragraph breaks:** Put a **blank line between every SOURCES beat** and **before** the Linden Hills / **${localBizName}** close — teleprompter paragraphs map 1:1 to slides.
-- **Tight but not thin:** On **main** beats only, add **one concrete detail** when the headline gives you something real (a number, vendor, mechanism) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
-- **Banned hype / podcast clichés (ON AIR and social — never say or echo):** “hold on to your hat(s),” “buckle up,” “deep dive,” “let’s dive in,” “fire hose,” “grab your popcorn,” “you won’t believe,” “crazy,” “insane” (unless the headline literally uses it), or **any** “fasten your seatbelts” style padding. Sound like a colleague at the bench, not a trailer voice.
+- **Tight but not thin:** On **main** beats only, add **one concrete detail** when the headline gives you something real (a number, vendor, mechanism) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” **“first up,” “meanwhile,” “on the hardware front,” “that's the tech wrap,”** “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
+- **Banned hype / podcast clichés (ON AIR and social — never say or echo):** “hold on to your hat(s),” “buckle up,” “deep dive,” “let’s dive in,” “fire hose,” “grab your popcorn,” “you won’t believe,” “crazy,” “insane” (unless the headline literally uses it), **“first up,” “meanwhile,” “next up,” “finally,” “wrapping up,” “on the hardware front,” “speaking of hardware,” “that's the tech wrap,”** or **any** “fasten your seatbelts” style padding. Sound like a colleague at the bench, not a trailer voice.
 - **Local business (every episode):** After your **four <<<SOURCES>>> beats**, the ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block) — **not** filler.
 
 You are writing for one **on-air column only** (teleprompter / VO).
@@ -1559,7 +1613,7 @@ ${localColorBlock}
 
 **COLUMN B — ON AIR (teleprompter / voiceover — spoken words only):**
 - **ALL CAPS.** Each **main** story (**REPAIR** + **TECH**/**HARDWARE**) is **1–3 short lines** max **inside its own paragraph** (one paragraph per **<<<SOURCES>>>** row): headline essence + **why it matters** + **one concrete detail** only when it fits without bloat (**skip** the detail if it forces wordiness). **SKATE** / **Wolves**: **≤2 short lines** each; often **one sentence** is enough. No long paragraphs, no recap of the whole web, **no multi-story mashups**.
-- **Single continuous take** — write so it flows straight through after the open; **no** “coming up / we’ve also got” runway; no “first story / next up / finally” padding; **no** “hold on to your hats,” **no** “deep dive,” **no** “buckle up” or similar.
+- **Single continuous take** — write so it flows straight through after the open; **no** “coming up / we’ve also got” runway; no “first story / next up / finally / meanwhile / first up” padding; **no** “hold on to your hats,” **no** “deep dive,” **no** “buckle up” or similar.
 - **Do not** put [B-ROLL] or shot notes in ON AIR.
 - START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. AND WE'VE GOT A LOT HITTING THE SHOP TODAY.
 - **Enunciation (INLINE):** phonetic in parentheses **on first mention only** next to the word — short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye). Real acronyms spelled: A I, G P U.
@@ -1741,17 +1795,12 @@ ${localColorBlock}
       fixedOnAir
     );
     indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
-    finalSegments = buildFinalSegments(indices, collected);
     const programmaticSourceFillIns = indices.filter(
       (i) => !uniqParsed.includes(i)
     );
     modelSocial = parsed.social;
     onAirForEmail = ensureLocalBusinessInOnAir(fixedOnAir, localBizName);
-    onAirForEmail = autoRepairOnAirCultureMismatch(
-      onAirForEmail,
-      finalSegments,
-      localBizName
-    );
+    finalSegments = buildFinalSegments(indices, collected);
     const selectedStories = finalSegments.map((s) => s.row);
     validationIssues = validateStudioOutput(
       onAirForEmail,
@@ -1759,16 +1808,17 @@ ${localColorBlock}
       localBizName,
       selectedStories,
       shouldRequireSkateBeat,
-      cultureMode
+      cultureMode,
+      fixedOnAir
     );
     const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
     const hasSkateSelected = selectedStories.some((s) => s.section === 'SKATE');
-    if (onAirReferencesWolvesBeat(onAirForEmail) && !hasWolvesSelected) {
+    if (onAirReferencesWolvesBeat(fixedOnAir) && !hasWolvesSelected) {
       validationIssues.push(
         'ON AIR mentions Wolves but final segment list has no LOCAL source row.'
       );
     }
-    if (onAirReferencesSkateBeat(onAirForEmail) && !hasSkateSelected) {
+    if (onAirReferencesSkateBeat(fixedOnAir) && !hasSkateSelected) {
       validationIssues.push(
         'ON AIR mentions skate but final segment list has no SKATE source row.'
       );
@@ -1799,6 +1849,12 @@ ${localColorBlock}
       'Validation failed after retries:\n' + validationIssues.join('\n')
     );
   }
+
+  onAirForEmail = autoRepairOnAirCultureMismatch(
+    onAirForEmail,
+    finalSegments,
+    localBizName
+  );
   if (onAirForEmail.trim() !== fixedOnAir.trim()) {
     console.warn(
       'ON AIR: Injected a neighbor line with the local business name (model output did not include it).'
