@@ -23,8 +23,8 @@ permissions:
 jobs:
   scrape_and_script:
     runs-on: ubuntu-latest
-    # Feeds + Gemini + optional Playwright source grabs
-    timeout-minutes: 20
+    # Feeds + Gemini (+ optional Instakyle /news publish)
+    timeout-minutes: 15
     # Opt into Node 24 for JS-based actions (see GitHub Actions deprecation notice)
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -89,9 +89,6 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Install Playwright (Chromium)
-        run: npx playwright install-deps chromium && npx playwright install chromium
-
       - name: Run News Agent
         env:
           # Google AI Studio (free tier): https://aistudio.google.com/apikey
@@ -103,9 +100,7 @@ jobs:
           RESEND_FROM: ${{ secrets.RESEND_FROM }}
           # Optional: stories per feed (default 6). Repo variable FEED_ITEM_LIMIT or omit.
           FEED_ITEM_LIMIT: ${{ vars.FEED_ITEM_LIMIT }}
-          # Optional: set to 0/false to skip JPEG attachments (saves CI time).
-          SCREENSHOT_SOURCES: ${{ vars.SCREENSHOT_SOURCES }}
-          # Optional: storefront URL for the day’s local spotlight screenshot + email block (overrides rotation `website` in local_businesses.ts).
+          # Optional: overrides rotation `website` in local_businesses.ts for Local Spotlight link.
           LOCAL_BIZ_WEBSITE: ${{ vars.LOCAL_BIZ_WEBSITE }}
           # After a successful Resend send: writes under this directory (see Resolve step).
           TECHNEWS_INSTAKYLE_NEWS_DIR: ${{ steps.instakyle_news.outputs.dir }}

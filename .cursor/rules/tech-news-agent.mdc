@@ -1,14 +1,14 @@
 ---
-description: TechNewsAgent RSS+Gemini+Resend pipeline, feeds, freshness, Bitcoin-only, screenshots
+description: TechNewsAgent RSS+Gemini+Resend pipeline, feeds, freshness, Bitcoin-only
 globs: "**/*.{ts,yml}"
 alwaysApply: false
 ---
 
 # TechNewsAgent
 
-- **Main entry:** `tech_news_agent.ts` — feeds → Gemini (`<<<VIDEO_PROMPT>>>` plain **STORY** blocks / legacy `##`, `<<<ON_AIR>>>`, `<<<SOURCES>>>`) → Resend email; optional Playwright shots in `screenshot_sources.ts`. **`<<<SOURCES>>>`** picks *which* stories; **segment order** follows the **`<<<SOURCES>>>`** line for email and `/news` JSON (same read order). **`USE_ON_AIR_SOURCE_REORDER=1`** re-sorts by hostname/title hits in **ON AIR** (legacy).
+- **Main entry:** `tech_news_agent.ts` — feeds → Gemini (`<<<VIDEO_PROMPT>>>` plain **STORY** blocks / legacy `##`, `<<<ON_AIR>>>`, `<<<SOURCES>>>`) → Resend email. Slide stills are **manual** (Safari Reader, etc.); legacy Playwright helpers in `screenshot_sources.ts` are not used by the daily run. **`<<<SOURCES>>>`** picks *which* stories; **segment order** follows the **`<<<SOURCES>>>`** line for email and `/news` JSON (same read order). **`USE_ON_AIR_SOURCE_REORDER=1`** re-sorts by hostname/title hits in **ON AIR** (legacy).
 - **Scope:** Broad tech (software, AI, hardware, gaming, dev, repair/maker); **Wolves before skate** when both appear; **Linden Hills** close; **Bitcoin-only** for digital money (no altcoin industry). Logic in `passesBitcoinOnlyCurrencyRule` and the Gemini prompt string.
 - **Freshness:** Defaults **18h** per section in `DEFAULT_MAX_STORY_AGE_HOURS` (**72h** for **SKATE** — weekly culture sites); override with `MAX_STORY_AGE_HOURS_TECH` (etc.). Undated feed items are rejected unless `ALLOW_UNDATED_FEED_ITEMS=1`.
 - **Feeds:** Arrays `techFeeds` / `hardwareFeeds` / `skateFeeds` / `localFeeds` in `tech_news_agent.ts`; NBA supplement `nba_wolves_news.ts`.
-- **Screenshots:** Default `SCREENSHOT_MODE=viewport` = full mobile frame (~393×852); `content` mode for article crop + `SCREENSHOT_MAX_CONTENT_HEIGHT`; optional `SCREENSHOT_HEADLINE_IMAGE_ONLY=1`. Email attaches JPEGs when enabled; **Instakyle `/news` omits screenshot files by default** — set `TECHNEWS_INSTAKYLE_SCREENSHOTS=1` to write `posts/images/…` again. Optional web export: `TECHNEWS_WEB_DIR` → `latest.json` + `web/technews.html` via `web_publish.ts`.
+- **Local directory:** `npm run directory:sync` pulls URLs from [lindenhills.org/directory](https://www.lindenhills.org/directory) into `local_businesses.ts`. Optional web export: `TECHNEWS_WEB_DIR` → `latest.json` + `web/technews.html` via `web_publish.ts`.
 - **Docs:** See root `AGENTS.md` for full maintainer summary.

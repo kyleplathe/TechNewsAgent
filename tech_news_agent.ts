@@ -985,7 +985,7 @@ function enforceSourceSectionCaps(
 
 /**
  * Ensure every selected source has a usable URL so beat count stays aligned
- * with SOURCE LINKS / screenshot attachments.
+ * with SOURCE LINKS.
  */
 function enforceSourcesHaveLinks(
   indices: number[],
@@ -1321,14 +1321,6 @@ function reorderIndicesToMatchOnAir(
     return a.orderInSources - b.orderInSources;
   });
   return decorated.map((d) => d.idx);
-}
-
-/** Default on; set SCREENSHOT_SOURCES=0 to skip Playwright (faster local runs / no browser install). */
-function envScreenshotsEnabled(): boolean {
-  const v = process.env.SCREENSHOT_SOURCES?.trim().toLowerCase();
-  if (v === undefined || v === '') return true;
-  if (['0', 'false', 'no', 'off'].includes(v)) return false;
-  return true;
 }
 
 async function runNewsAgent() {
@@ -1903,11 +1895,11 @@ ${localColorBlock}
 
   if (!finalSegments.length) {
     console.warn(
-      'No <<<SOURCES>>> line parsed — email will omit screenshot links (check model output).'
+      'No <<<SOURCES>>> line parsed — email will omit source links (check model output).'
     );
   } else {
     console.log(
-      'Sources used for segment (screenshots):',
+      'Sources used for segment:',
       finalSegments.map((s) => s.storyIndex).join(', ')
     );
   }
@@ -1918,7 +1910,7 @@ ${localColorBlock}
   const hasLocalSpotlightLink =
     !!localBizWebsiteResolved && /^https?:\/\//i.test(localBizWebsiteResolved);
 
-  /** Plain text: [SECTION] Title then URL on next line (matches FCP / screenshot workflow). */
+  /** Plain text: [SECTION] Title then URL on next line (matches FCP / slide workflow). */
   const linkRowsText = used.map((c) => `[${c.section}] ${c.title}\n${c.link}`);
   if (hasLocalSpotlightLink) {
     linkRowsText.push(`[Local Spotlight] ${localBizName}\n${localBizWebsiteResolved}`);
@@ -1941,172 +1933,10 @@ ${localColorBlock}
       ? linksHtmlRows.join('')
       : `<p style="color:#888;font-size:13px">No parsed source list — model did not return <<<SOURCES>>> lines, or no URLs in those items.</p>`;
 
-  const screenshotItems = finalSegments.map((segment) => ({
-    storyIndex: segment.storyIndex,
-    section: segment.row.section,
-    title: segment.row.title,
-    link: segment.row.link.trim(),
-  }));
-
-  let attachments:
-    | Array<{ filename: string; content: Buffer; contentType?: string }>
-    | undefined;
-  let screenshotBannerText = '';
-  let screenshotBannerHtml = '';
-  let screenshotKept: Array<{
-    storyIndex: number;
-    filename: string;
-    content: Buffer;
-    link: string;
-  }> = [];
-
-  if (envScreenshotsEnabled() && screenshotItems.length) {
-    const requestedScreenshotMax =
-      Math.max(1, parseInt(process.env.SCREENSHOT_MAX ?? '12', 10) || 12);
-    const max = Math.min(
-      12,
-      Math.max(TARGET_SOURCE_STORIES, requestedScreenshotMax)
-    );
-    if (requestedScreenshotMax < TARGET_SOURCE_STORIES) {
-      console.warn(
-        `SCREENSHOT_MAX=${requestedScreenshotMax} is below required source count (${TARGET_SOURCE_STORIES}); raising screenshot cap to ${max}.`
-      );
-    }
-    const slice = screenshotItems.slice(0, max);
-    console.log(
-      `Capturing ${slice.length} source screenshot(s) (Playwright / Chromium)…`
-    );
-    const { screenshotSources } = await import('./screenshot_sources');
-    const { ok: shots, failures: shotFails } = await screenshotSources(slice);
-
-    const maxBytes = Math.min(
-      38 * 1024 * 1024,
-      Math.max(
-        5 * 1024 * 1024,
-        parseInt(process.env.SCREENSHOT_MAX_TOTAL_BYTES ?? '34000000', 10) ||
-          34_000_000
-      )
-    );
-    let total = 0;
-    screenshotKept = [];
-    for (const s of shots) {
-      if (total + s.content.length > maxBytes) {
-        console.warn(
-          `Screenshot size budget reached — omitting further attachments (${s.filename}).`
-        );
-        break;
-      }
-      total += s.content.length;
-      screenshotKept.push(s);
-    }
-
-    if (screenshotKept.length) {
-      attachments = screenshotKept.map((s) => ({
-        filename: s.filename,
-        content: s.content,
-        contentType: 'image/jpeg',
-      }));
-      const names = screenshotKept.map((s) => s.filename).join(', ');
-      screenshotBannerText = `\nSOURCE SCREENSHOTS — ${screenshotKept.length} JPEG: ${names}\nDefault: **viewport** = full mobile frame (~393×852 CSS px at DPR 1 unless SCREENSHOT_WIDTH/HEIGHT set). Use SCREENSHOT_MODE=content for article-only crop, or SCREENSHOT_MODE=reader for cleaner reader-style article grabs. Order matches <<<SOURCES>>>. See AGENTS.md.\n`;
-      screenshotBannerHtml =
-        `<p style="font-size:12px;font-weight:700;color:#444;margin:1.25em 0 0.35em">Source screenshots</p>` +
-        `<p style="font-size:13px;line-height:1.45;margin:0 0 1em;color:#333">${escapeHtml(
-          `${screenshotKept.length} JPEG(s) — ${names}. Default full mobile viewport (phone-shaped grab); order matches SOURCES. Paywalls/bots may yield partial pages.`
-        )}</p>`;
-    }
-    if (shotFails.length) {
-      const failLines = shotFails
-        .map((f: { storyIndex: number; link: string; error: string }) => `#${f.storyIndex} ${f.link} — ${f.error}`)
-        .join('\n');
-      console.warn('Screenshot failures:\n' + failLines);
-      screenshotBannerText +=
-        '\nScreenshot failures / skips:\n' + failLines + '\n';
-      screenshotBannerHtml +=
-        `<p style="font-size:12px;font-weight:700;color:#666;margin:0 0 0.35em">Screenshot failures</p>` +
-        `<pre style="white-space:pre-wrap;font-size:11px;line-height:1.4;margin:0 0 1em;padding:10px;background:#fff8f5;border-radius:6px;border:1px solid #eee">${escapeHtml(failLines)}</pre>`;
-    }
-  } else if (!envScreenshotsEnabled()) {
-    console.log('SCREENSHOT_SOURCES disabled — skipping Playwright.');
-  }
-
-  let localSpotlightShot: { filename: string; content: Buffer } | null = null;
-  if (
-    localBizWebsiteResolved &&
-    /^https?:\/\//i.test(localBizWebsiteResolved) &&
-    envScreenshotsEnabled()
-  ) {
-    const { screenshotSources } = await import('./screenshot_sources');
-    const spotlightInput = {
-      storyIndex: 99,
-      section: 'LOCAL',
-      title: localBizName,
-      link: localBizWebsiteResolved,
-      filenameOverride: '99-local-spotlight.jpg',
-    };
-    let { ok: locOk, failures: locFail } = await screenshotSources([
-      spotlightInput,
-    ]);
-    let hit = locOk[0];
-    if (!hit) {
-      console.warn(
-        'Local spotlight (default viewport/UA) failed — retrying with desktop layout…',
-        locFail
-      );
-      const prevMobile = process.env.SCREENSHOT_MOBILE;
-      process.env.SCREENSHOT_MOBILE = '0';
-      try {
-        const r2 = await screenshotSources([spotlightInput]);
-        hit = r2.ok[0];
-        if (!hit) {
-          console.warn('Local spotlight (desktop retry) failed:', r2.failures);
-        }
-      } finally {
-        if (prevMobile === undefined) {
-          delete process.env.SCREENSHOT_MOBILE;
-        } else {
-          process.env.SCREENSHOT_MOBILE = prevMobile;
-        }
-      }
-    }
-    if (hit) {
-      localSpotlightShot = { filename: hit.filename, content: hit.content };
-    }
-  } else if (!localBizWebsiteResolved) {
+  if (!localBizWebsiteResolved) {
     console.warn(
-      'LOCAL SPOTLIGHT: No business website URL — set LOCAL_BIZ_WEBSITE or add optional `website` on entries in local_businesses.ts for a storefront grab and email JPEG.'
+      'LOCAL SPOTLIGHT: No business website URL — set LOCAL_BIZ_WEBSITE or sync `website` from https://www.lindenhills.org/directory via npm run directory:sync.'
     );
-  } else if (!envScreenshotsEnabled()) {
-    console.warn(
-      'LOCAL SPOTLIGHT: SCREENSHOT_SOURCES is off — no storefront JPEG (website link can still appear in the email).'
-    );
-  }
-
-  const maxBytesAttach = Math.min(
-    38 * 1024 * 1024,
-    Math.max(
-      5 * 1024 * 1024,
-      parseInt(process.env.SCREENSHOT_MAX_TOTAL_BYTES ?? '34000000', 10) ||
-        34_000_000
-    )
-  );
-  const emailAttachments: Array<{
-    filename: string;
-    content: Buffer;
-    contentType?: string;
-  }> = [...(attachments ?? [])];
-  if (localSpotlightShot) {
-    const totalSoFar = emailAttachments.reduce((n, a) => n + a.content.length, 0);
-    if (totalSoFar + localSpotlightShot.content.length <= maxBytesAttach) {
-      emailAttachments.push({
-        filename: localSpotlightShot.filename,
-        content: localSpotlightShot.content,
-        contentType: 'image/jpeg',
-      });
-    } else {
-      console.warn(
-        'LOCAL SPOTLIGHT: attachment skipped — would exceed SCREENSHOT_MAX_TOTAL_BYTES.'
-      );
-    }
   }
 
   const resendKey = process.env.RESEND_API_KEY;
@@ -2136,7 +1966,7 @@ ${localColorBlock}
 
   const linksHeader =
     used.length > 0
-      ? 'SOURCE LINKS (for this segment — screenshots / posts)'
+      ? 'SOURCE LINKS (for this segment)'
       : 'SOURCE LINKS (none parsed — see log)';
 
   const onAirHeader = 'ON AIR (teleprompter / VO)';
@@ -2171,7 +2001,6 @@ ${localColorBlock}
     linksHeader,
     '',
     linksText || '(none)',
-    screenshotBannerText.trimEnd(),
   ]
     .filter((block) => block.length > 0)
     .join('\n');
@@ -2187,7 +2016,6 @@ ${localColorBlock}
     `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;margin:0 0 1.25em;padding:12px;background:#fefce8;border-radius:8px;border:1px solid #eab308;user-select:all;-webkit-user-select:all">${escapeHtml(ytVerifyLine)}</pre>` +
     `<p style="font-size:12px;font-weight:700;color:#444;margin:0 0 0.5em">${escapeHtml(linksHeader)}</p>` +
     `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.45">${linksHtml}</div>` +
-    screenshotBannerHtml +
     `</div>`;
 
   const resendMaxAttempts = Math.min(
@@ -2206,10 +2034,9 @@ ${localColorBlock}
       const res = await resend.emails.send({
         from,
         to,
-        subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}${emailAttachments.length ? ' 📎' : ''}`,
+        subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`,
         text: emailText,
         html: emailHtml,
-        ...(emailAttachments.length ? { attachments: emailAttachments } : {}),
       });
 
       if (!res.error) {
@@ -2261,8 +2088,6 @@ ${localColorBlock}
     let localSpotlightForWeb: {
       websiteUrl: string;
       businessName: string;
-      imageFilename?: string;
-      imageBuffer?: Buffer;
     } | null = null;
     if (
       localBizWebsiteResolved &&
@@ -2271,40 +2096,19 @@ ${localColorBlock}
       localSpotlightForWeb = {
         websiteUrl: localBizWebsiteResolved,
         businessName: localBizName,
-        ...(localSpotlightShot
-          ? {
-              imageFilename: localSpotlightShot.filename,
-              imageBuffer: localSpotlightShot.content,
-            }
-          : {}),
       };
     }
 
     const { writeTechNewsWebBundle } = await import('./web_publish');
     const bizForSeo: LocalBusiness = { ...pickedBiz, name: localBizName };
     const seoKeywords = buildSeoKeywords(bizForSeo, used);
-    const webStories = finalSegments.map(({ storyIndex, row: c }) => {
-      const shot = screenshotKept.find((k) => k.storyIndex === storyIndex);
-      const imageFilename = shot?.filename;
-      if (imageFilename) {
-        const m = imageFilename.match(/^(\d{1,3})-/);
-        const prefix = m ? Number(m[1]) : NaN;
-        if (Number.isFinite(prefix) && prefix !== storyIndex) {
-          console.warn(
-            `WEB: JPEG prefix ${prefix} ≠ storyIndex ${storyIndex} (${c.title.slice(0, 48)}…) — check pairing.`
-          );
-        }
-      }
-      return {
-        storyIndex,
-        section: mapSectionForBlog(c.section),
-        title: c.title,
-        link: c.link,
-        publishedAt: c.date,
-        imageFilename,
-        imageBuffer: shot?.content,
-      };
-    });
+    const webStories = finalSegments.map(({ storyIndex, row: c }) => ({
+      storyIndex,
+      section: mapSectionForBlog(c.section),
+      title: c.title,
+      link: c.link,
+      publishedAt: c.date,
+    }));
     await writeTechNewsWebBundle({
       ...(webDir ? { outDir: webDir } : {}),
       ...(instakyleNewsDir ? { instakyleNewsDir } : {}),
@@ -2344,9 +2148,6 @@ ${localColorBlock}
   }
 
   console.log('Mission accomplished. Resend id:', sendData?.id);
-  if (attachments?.length) {
-    console.log(`Attached ${attachments.length} source screenshot(s).`);
-  }
   if (linksText) {
     console.log('\n--- Segment links ---\n' + linksText);
   }

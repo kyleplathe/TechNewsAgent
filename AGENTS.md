@@ -1,6 +1,6 @@
 # TechNewsAgent — agent / maintainer guide
 
-Single Node script (`tech_news_agent.ts`) pulls RSS (+ NBA.com Timberwolves embedded JSON), calls Gemini for studio output, optionally attaches Playwright JPEGs, emails via Resend.
+Single Node script (`tech_news_agent.ts`) pulls RSS (+ NBA.com Timberwolves embedded JSON), calls Gemini for studio output, emails via Resend. Slide stills are captured manually (Safari Reader, etc.) — not automated.
 
 ## Editorial scope
 
@@ -27,25 +27,23 @@ Items **without a parseable `pubDate` / Atom date** are **dropped** unless `ALLO
 
 ## Email layout (precision)
 
-Order: **Ticker** → **ON AIR** (ALL CAPS) → **SOCIAL** caption → **YOUTUBE** (one-line `TND-YYYY-MM-DD` token — paste into the Short’s **description** so **Publish Tech News to Instakyle** can verify + sync the upload) → **SOURCE LINKS** → screenshot note + attachments.
+Order: **Ticker** → **ON AIR** (ALL CAPS) → **SOCIAL** caption → **YOUTUBE** (one-line `TND-YYYY-MM-DD` token — paste into the Short’s **description** so **Publish Tech News to Instakyle** can verify + sync the upload) → **SOURCE LINKS**.
 
 Markers in model output: `<<<ON_AIR>>>`, `<<<SOURCES>>>` (one line of comma-separated 1-based story numbers = same numbers as the **numbered list** in the prompt — **which** stories are in the segment), then `<<<SOCIAL>>>` (short Threads-style body; the script prepends the title line and one hashtag line).
 
-**SOURCE LINKS / email JPEG order (default):** indices follow the model’s **`<<<SOURCES>>>`** line (same order as slide / VO beats). Set **`USE_ON_AIR_SOURCE_REORDER=1`** to re-sort by hostname/title hits in **`<<<ON_AIR>>>`** (legacy heuristic).
+**SOURCE LINKS order (default):** indices follow the model’s **`<<<SOURCES>>>`** line (same order as slide / VO beats). Set **`USE_ON_AIR_SOURCE_REORDER=1`** to re-sort by hostname/title hits in **`<<<ON_AIR>>>`** (legacy heuristic).
 
-**Blog / Instakyle story rows:** Always the same order as the email and **`<<<SOURCES>>>`** / teleprompter (keeps `VIDEO PROMPT` **STORY** blocks aligned 1:1). Post JSON includes **`segmentOrder`** (1-based VO position) and **`storyIndex`** (daily feed pool # for screenshots); **sort the UI by `segmentOrder` or JSON array order, not by `storyIndex`.** When building web rows, each story’s **`storyIndex`** must stay paired with its feed row (do not zip against `<<<SOURCES>>>` indices after dropping items with empty URLs — that misaligned screenshots vs. links on `/news`).
+**Blog / Instakyle story rows:** Always the same order as the email and **`<<<SOURCES>>>`** / teleprompter (keeps `VIDEO PROMPT` **STORY** blocks aligned 1:1). Post JSON includes **`segmentOrder`** (1-based VO position) and **`storyIndex`** (daily feed pool # — useful when naming manual slide grabs, e.g. `03-headline.jpg`). **Sort the UI by `segmentOrder` or JSON array order, not by `storyIndex`.** When building web rows, each story’s **`storyIndex`** must stay paired with its feed row (do not zip against `<<<SOURCES>>>` indices after dropping items with empty URLs).
 
-Post JSON includes **`seoKeywords`** (neighborhood + business + story tokens) and optional **`localSpotlight`** (**Local Spotlight** — business URL + screenshot) when `LOCAL_BIZ_WEBSITE` or the rotation entry has a **`website`** URL.
+Post JSON includes **`seoKeywords`** (neighborhood + business + story tokens) and optional **`localSpotlight`** (**Local Spotlight** — business URL link) when `LOCAL_BIZ_WEBSITE` or the rotation entry has a **`website`** URL.
 
-The **daily email** also includes a **Local spotlight** block (name + URL + **`99-local-spotlight.jpg`** after story grabs — use it last in the slide deck) and **injects** the business name into **ON AIR** if Gemini omitted it. Each rotation entry in **`local_businesses.ts`** should have a **`website`** (see `docs/linden-hills-43rd-upton/README.md`); **`LOCAL_BIZ_WEBSITE`** (repo var / `.env`) overrides when set. If the first capture fails, the agent retries once with **desktop** layout (`SCREENSHOT_MOBILE=0`). **Rotation:** default **`LOCAL_BIZ_ROTATION_POOL=all`** cycles the full directory (spotlight JPEG only when that row has a URL); set **`LOCAL_BIZ_ROTATION_POOL=websites`** to limit picks to URL rows only (legacy). Default **`LOCAL_BIZ_ROTATION_ORDER=shuffled`** uses a year-seeded deterministic shuffle so consecutive calendar days are not always consecutive directory rows; **`list`** restores strict directory order by day-of-year.
+The **daily email** also includes a **Local spotlight** block (name + URL) and **injects** the business name into **ON AIR** if Gemini omitted it. Sync URLs from [lindenhills.org/directory](https://www.lindenhills.org/directory) via **`npm run directory:sync`**; **`LOCAL_BIZ_WEBSITE`** (repo var / `.env`) overrides when set. **Rotation:** default **`LOCAL_BIZ_ROTATION_POOL=all`** cycles the full directory; set **`LOCAL_BIZ_ROTATION_POOL=websites`** to limit picks to URL rows only (legacy). Default **`LOCAL_BIZ_ROTATION_ORDER=shuffled`** uses a year-seeded deterministic shuffle so consecutive calendar days are not always consecutive directory rows; **`list`** restores strict directory order by day-of-year.
 
 If the email looks truncated or missing a column, check Gemini `maxOutputTokens` and API errors; markers must be exact.
 
-## Screenshots (`screenshot_sources.ts`)
+## Slide stills (manual)
 
-- Default **`SCREENSHOT_MODE=viewport`**: one **full mobile frame** per URL (~**393×852** CSS px with default `SCREENSHOT_MOBILE` — same shape as a normal phone screenshot: chrome + headline + first scroll fold). Consistent size for slides.
-- **`SCREENSHOT_MODE=content`**: crop to article/main from the headline down, max height `SCREENSHOT_MAX_CONTENT_HEIGHT` (default **2400** CSS px); optional `SCREENSHOT_HEADLINE_IMAGE_ONLY=1` for tight h1+hero union.
-- Disable screenshots: `SCREENSHOT_SOURCES=0`.
+The agent does **not** capture or attach JPEGs. Grab article stills yourself (Safari Reader, etc.) and import into your slide deck; **`storyIndex`** in SOURCE LINKS / post JSON matches the numbered filenames you use (`01-…`, `02-…`, …). Legacy Playwright helpers remain in **`screenshot_sources.ts`** if you ever want to experiment locally — they are not wired into the daily run or CI.
 
 ## Voiceover length (~90s desk)
 
@@ -74,8 +72,8 @@ If **`public/news/posts/YYYY-MM-DD.json`** already exists on the Instakyle defau
 | `INSTAKYLE_PUSH_TOKEN` | For site + artifact | PAT on **Instakyle-clean** (contents read/write). Omit for **email-only** CI. |
 | `NEWS_SITE_PUBLISH_MODE` | Optional | `auto` or `manual` (see above). |
 | `NEWS_SITE_FORCE_REPUBLISH` | Optional | `true` to allow replacing today’s post on auto push. |
-| `TECHNEWS_SITE_ORIGIN` | Optional | e.g. `https://instakyle.tech` — absolute `imageUrl` in post JSON when blog screenshots are on. |
-| `TECHNEWS_INSTAKYLE_SCREENSHOTS` | Optional | `1` to write `posts/images/…` on Instakyle; default **off** (email JPEGs unchanged). |
+| `TECHNEWS_SITE_ORIGIN` | Optional | e.g. `https://instakyle.tech` — absolute `imageUrl` when you add images to post JSON manually. |
+| `TECHNEWS_INSTAKYLE_SCREENSHOTS` | Optional | Legacy — agent no longer writes `posts/images/…`; leave off unless you add images yourself. |
 | `TECHNEWS_VIDEO_URL` | Optional secret | That day’s video link on the post page. |
 | `YOUTUBE_API_KEY` | For optional YouTube verify/sync in **Publish Tech News to Instakyle** | Google Cloud: enable **YouTube Data API v3**, restrict key to that API. Repo **Actions secret**; used to read `videos.list` and `search.list`. |
 | `YOUTUBE_CHANNEL_ID` | Optional but recommended | Repo variable (e.g. `UC...`) to constrain YouTube search to your channel during auto-discovery. |
@@ -94,7 +92,7 @@ Local (auto-discover by token): `YOUTUBE_API_KEY=... npm run youtube:sync -- --n
 
 ## Secrets / env
 
-Resend, Gemini, `RESEND_TO`, optional `FEED_ITEM_LIMIT`, `SCREENSHOT_*`, `GEMINI_MODEL`, optional `USE_ON_AIR_SOURCE_REORDER`, `LOCAL_BIZ_WEBSITE`, etc. Never commit `.env`.
+Resend, Gemini, `RESEND_TO`, optional `FEED_ITEM_LIMIT`, `GEMINI_MODEL`, optional `USE_ON_AIR_SOURCE_REORDER`, `LOCAL_BIZ_WEBSITE`, etc. Never commit `.env`.
 
 ### Culture slot override (Skate vs Timberwolves)
 
@@ -109,10 +107,10 @@ To force one lane for a run (and prevent “swap-back” by the model), set:
 
 ## TechNews web bundle (optional)
 
-Set **`TECHNEWS_WEB_DIR`** to an absolute or relative path; after a **successful Resend send** the agent writes **`latest.json`**, **`images/*.jpg`** (when screenshots exist), and **`technews.html`** (static shell; disable with `TECHNEWS_WEB_HTML=0`). Talking-point text per story is parsed from the **VIDEO PROMPT** **STORY** blocks (legacy **`##`** Markdown still supported). Optional **`TECHNEWS_PUBLIC_BASE_URL`** (no trailing slash) adds absolute `imageUrl` fields for hosting images on a CDN. Deploy the folder to any static host (S3/Cloudflare R2 website, Netlify, Vercel static, etc.) or sync from CI; the page loads `latest.json` via `fetch` (needs HTTP(S), not `file://`).
+Set **`TECHNEWS_WEB_DIR`** to an absolute or relative path; after a **successful Resend send** the agent writes **`latest.json`** and **`technews.html`** (static shell; disable with `TECHNEWS_WEB_HTML=0`). Talking-point text per story is parsed from the **VIDEO PROMPT** **STORY** blocks (legacy **`##`** Markdown still supported). Optional **`TECHNEWS_PUBLIC_BASE_URL`** (no trailing slash) adds absolute `imageUrl` fields if you host images separately. Deploy the folder to any static host (S3/Cloudflare R2 website, Netlify, Vercel static, etc.) or sync from CI; the page loads `latest.json` via `fetch` (needs HTTP(S), not `file://`).
 
 ### Instakyle site (`/news`)
 
-Set **`TECHNEWS_INSTAKYLE_NEWS_DIR`** to the **Instakyle** repo path **`public/news`** (e.g. clone sibling + absolute path). After email succeeds, each run writes **`manifest.json`** (episode list) and **`posts/YYYY-MM-DD.json`** (Chicago date slug). **Instakyle posts do not include source screenshots by default** (JPEGs still attach to the email when **`SCREENSHOT_SOURCES`** is on). To write **`posts/images/YYYY-MM-DD/*.jpg`** and **`image` / `imageUrl`** on the blog again, set **`TECHNEWS_INSTAKYLE_SCREENSHOTS=1`**. The React app serves **`/news`** (index) and **`/news/:slug`** (episode). Optional **`TECHNEWS_VIDEO_URL`** = that day’s YouTube/Instagram/etc. link (shown as “Watch the video”). Optional **`TECHNEWS_SITE_ORIGIN`** (no trailing slash, e.g. `https://instakyle.tech`) fills **`imageUrl`** in post JSON when blog screenshots are enabled. You can set **`TECHNEWS_WEB_DIR`** and **`TECHNEWS_INSTAKYLE_NEWS_DIR`** together or only one of them.
+Set **`TECHNEWS_INSTAKYLE_NEWS_DIR`** to the **Instakyle** repo path **`public/news`** (e.g. clone sibling + absolute path). After email succeeds, each run writes **`manifest.json`** (episode list) and **`posts/YYYY-MM-DD.json`** (Chicago date slug). Posts include story links and **Local Spotlight** URL when the rotation row has a **`website`** (sync via **`npm run directory:sync`**). The React app serves **`/news`** (index) and **`/news/:slug`** (episode). Optional **`TECHNEWS_VIDEO_URL`** = that day’s YouTube/Instagram/etc. link (shown as “Watch the video”). Optional **`TECHNEWS_SITE_ORIGIN`** (no trailing slash, e.g. `https://instakyle.tech`) fills **`imageUrl`** when you add images to JSON yourself. You can set **`TECHNEWS_WEB_DIR`** and **`TECHNEWS_INSTAKYLE_NEWS_DIR`** together or only one of them.
 
 **Instakyle episode layout:** the Short (or watch link) and a **numbered source list** (headline + domain + favicon) share a split column on wide viewports. Optional **`videoStartSec`** per story is still written by **`WEB_VIDEO_START_SECS`** / merge for possible future use; it is not required for the current site UI.

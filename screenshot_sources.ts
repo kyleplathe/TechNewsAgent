@@ -1,3 +1,7 @@
+/**
+ * Legacy Playwright JPEG capture — not used by the daily agent or CI.
+ * Kyle grabs slide stills manually (Safari Reader). Kept for local experiments.
+ */
 import { chromium, type Browser, type Locator, type Page } from 'playwright';
 
 export type SourceShotInput = {

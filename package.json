@@ -12,7 +12,8 @@
     "test": "npm run typecheck && npm run self-check",
     "test:email": "tsx scripts/test-email.ts",
     "youtube:sync": "tsx scripts/youtube-verify-and-sync.ts",
-    "maps:linden-hills": "tsx scripts/linden-hills-apple-maps-shots.ts"
+    "maps:linden-hills": "tsx scripts/linden-hills-apple-maps-shots.ts",
+    "directory:sync": "tsx scripts/sync-linden-hills-directory-urls.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
