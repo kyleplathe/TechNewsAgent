@@ -2,6 +2,15 @@
 
 Single Node script (`tech_news_agent.ts`) pulls RSS (+ NBA.com Timberwolves embedded JSON), calls Gemini for studio output, emails via Resend. Slide stills are captured manually (Safari Reader, etc.) — not automated.
 
+## Run modes
+
+- **Auto editor (default):** `npm start` — Gemini picks the lineup from the full filtered candidate pool (Bitcoin-only, editorial scope, repeat cooldown all applied), then writes ON AIR / SOCIAL.
+- **Manual picker (`PICK_MODE=1`):** `npm run pick` — fetches the same feeds, applies **only** freshness + same-run de-dupe (Bitcoin-only / editorial-scope / cooldown become **advisory badges**, nothing is dropped), then opens a **local web picker** (`lib/article_picker.ts`, `http://127.0.0.1:<port>/`). You cherry-pick the stories (checkboxes + clickable links; **selection order = on-air / slide order**), click **Generate script**, and the agent forces your picks as `<<<SOURCES>>>` and runs Gemini + email + blog for exactly those. **Flexible count** (pick any number; ~3–5 recommended) — word budget and structure validation scale to the count (`pickModeWordBounds` / `validatePickModeOutput`). Picks with no URL are dropped (can't build source links). Composition guardrails (section caps, one-Wolves-max, skate cadence, sports placement) are **skipped** in pick mode — you're the editor.
+
+## Automation (GitHub Actions)
+
+Both workflows are **manual-only** (`workflow_dispatch`) — the daily cron + push triggers were removed. Trigger via **Actions → Run workflow**. Everything else about the workflows (Instakyle publish, backfill, YouTube sync) is unchanged.
+
 ## Editorial scope
 
 - **Tech:** Software, AI/ML, hardware & gadgets, gaming (news + industry), developer ecosystem, security when it’s tech news. Sources are listed in `tech_news_agent.ts` (`techFeeds` / `hardwareFeeds`).
@@ -51,7 +60,7 @@ Target **one take ~90s** (**~85–95s** window; prompt budgets **~175–215 spok
 
 ## CI schedule
 
-`.github/workflows/daily_news.yml` — cron is **UTC** (`0 10 * * *` ≈ **5:00 AM America/Chicago** during **CDT**; ≈ **4:00 AM** during **CST** — switch to `0 11 * * *` in winter if you want 5:00 AM local all year). The workflow sets **`actions: write`** on the `GITHUB_TOKEN` (in addition to `contents: read`) so **`upload-artifact` succeeds**; a `permissions` block with only `contents: read` leaves `actions` at `none` and artifact upload will fail. **Do not use `secrets` inside step `if:`** (GitHub rejects the workflow); gate steps with a small shell step that sets `GITHUB_OUTPUT` from `env: INSTAKYLE_PUSH_TOKEN: ${{ secrets.INSTAKYLE_PUSH_TOKEN }}`.
+`.github/workflows/daily_news.yml` is **manual-only** (`workflow_dispatch`) — the daily cron + `push` triggers were removed (run it from **Actions → Run workflow**; locally just use `npm start` / `npm run pick`). If you ever want the cron back, re-add a `schedule:` block (`0 10 * * *` ≈ **5:00 AM America/Chicago** during **CDT**; ≈ **4:00 AM** during **CST** — `0 11 * * *` for ~5:00 AM CST). The workflow sets **`actions: write`** on the `GITHUB_TOKEN` (in addition to `contents: read`) so **`upload-artifact` succeeds**; a `permissions` block with only `contents: read` leaves `actions` at `none` and artifact upload will fail. **Do not use `secrets` inside step `if:`** (GitHub rejects the workflow); gate steps with a small shell step that sets `GITHUB_OUTPUT` from `env: INSTAKYLE_PUSH_TOKEN: ${{ secrets.INSTAKYLE_PUSH_TOKEN }}`.
 
 With **`INSTAKYLE_PUSH_TOKEN`** set, the workflow checks out **Instakyle-clean** (to seed **`manifest.json`** when needed), runs the agent, then always uploads a **`news-site-bundle`** artifact (retention 5 days). Episode JSON includes **`sourceWorkflowRunId`** / **`sourceWorkflowRunUrl`** so you can match **instakyle.tech/news** to the exact Actions run (and the email from that run).
 
@@ -83,7 +92,7 @@ If **`public/news/posts/YYYY-MM-DD.json`** already exists on the Instakyle defau
 - Post JSON from `web_publish` includes **`episodeVerificationToken`** (`TND-{Chicago slug}`) and, after sync, **`youtubeVideoId`** + **`videoUrl`**. Re-running the daily agent the same day **preserves** synced `youtubeVideoId` / `videoUrl` when `TECHNEWS_VIDEO_URL` is unset.
 - **`web/technews.html`** shows a responsive embed when `youtubeVideoId` or a parseable `videoUrl` is present.
 - Workflow **Publish Tech News to Instakyle** handles **YouTube sync only** (post JSON is already published by the daily flow). It runs in three ways:
-  - **Daily cron (auto):** **`'15 13 * * *'`** UTC ≈ **8:15 AM Chicago during CDT** (≈ 7:15 AM during CST — switch to **`'15 14 * * *'`** in winter for 8:15 AM local year-round). Targets the **newest** `manifest.json` slug and runs **`--allow-missing`** with **`YOUTUBE_DISCOVERY_ATTEMPTS=15`** / **`YOUTUBE_DISCOVERY_SLEEP_MS=60000`** so the run waits up to ~15 minutes for YouTube to index a Short uploaded right at the 8:00 AM deadline; if nothing is found it exits clean (no false-negative failures). Workflow is idempotent — if today's post already has the video synced, the commit step is a no-op.
+  - **Manual (was a daily cron):** the **`'15 13 * * *'`** auto cron was removed — this workflow is now `workflow_dispatch`-only. Trigger it after you upload the Short. (If you want the cron back: `'15 13 * * *'` UTC ≈ **8:15 AM Chicago during CDT**; `'15 14 * * *'` for 8:15 AM during CST. It targets the newest `manifest.json` slug with **`--allow-missing`** + **`YOUTUBE_DISCOVERY_ATTEMPTS=15`** / **`YOUTUBE_DISCOVERY_SLEEP_MS=60000`**, waiting ~15 min for YouTube to index, exiting clean on miss. Idempotent — if today's post already has the video synced, the commit step is a no-op.)
   - **Manual after filming:** **Actions → Run workflow** with the **slug** field **blank** — uses the newest manifest slug + auto-discovery (strict mode; fails on miss so you can rerun).
   - **Backfill an older episode** (e.g. you uploaded the Short late or replaced it): **Actions → Run workflow** and set **slug** = **`YYYY-MM-DD`** (Chicago). The workflow validates the slug format and that **`public/news/posts/{slug}.json`** exists on Instakyle-clean before calling the sync script. For a **specific** slug locally or to pin an explicit YouTube URL, use the `npm run youtube:sync` commands below.
 

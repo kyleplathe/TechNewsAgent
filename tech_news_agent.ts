@@ -688,6 +688,25 @@ function onAirWordBounds(): { min: number; max: number } {
   return { min, max };
 }
 
+/**
+ * Word bounds for PICK_MODE, scaled to however many stories the editor chose
+ * (~one beat each + a short neighborhood close). `ON_AIR_MIN_WORDS` /
+ * `ON_AIR_MAX_WORDS` override when explicitly set.
+ */
+function pickModeWordBounds(targetCount: number): { min: number; max: number } {
+  const perBeatMin = 26;
+  const perBeatMax = 52;
+  const closeWords = 24;
+  let min = Math.max(60, targetCount * perBeatMin + closeWords);
+  let max = targetCount * perBeatMax + closeWords + 16;
+  const envMin = parseInt(process.env.ON_AIR_MIN_WORDS ?? '', 10);
+  const envMax = parseInt(process.env.ON_AIR_MAX_WORDS ?? '', 10);
+  if (Number.isFinite(envMin) && envMin > 0) min = envMin;
+  if (Number.isFinite(envMax) && envMax > 0) max = envMax;
+  if (max < min + 20) max = min + 20;
+  return { min, max };
+}
+
 /** Matches Timberwolves / Wolves on air — must align with [LOCAL] in <<<SOURCES>>>. */
 const ON_AIR_WOLVES_RE =
   /\b(timberwolves|\bwolves\b|minnesota\s+timberwolves)\b/i;
@@ -905,6 +924,65 @@ function validateStudioOutput(
     );
   }
   issues.push(...validateCultureBeatPlacement(selectedStories));
+  return issues;
+}
+
+/**
+ * Lighter validation for PICK_MODE: the editor already chose the lineup, so we
+ * skip composition rules (section caps, sports slot, skate cadence) and keep only
+ * the writing-quality gates — structure, business mention, banned padding,
+ * per-story anchors, and a story-count-scaled word budget.
+ */
+function validatePickModeOutput(
+  onAir: string,
+  localBizName: string,
+  selectedStories: Collected[],
+  targetCount: number
+): string[] {
+  const issues: string[] = [];
+  if (/\blake street\b/i.test(onAir)) {
+    issues.push('ON AIR must not mention Lake Street.');
+  }
+  if (/\blynx\b/i.test(onAir)) {
+    issues.push('ON AIR must not mention Lynx.');
+  }
+  const paraBlocks = countParagraphBlocksBeforeSignoff(onAir);
+  const maxAllowedParaBlocks = targetCount + 2;
+  if (paraBlocks < targetCount) {
+    issues.push(
+      `ON AIR structure: use **one paragraph per picked story** (blank line between beats, another before the Linden Hills close). Found ${paraBlocks} paragraph block(s) before sign-off; need **at least ${targetCount}** — do not merge picks into one paragraph.`
+    );
+  }
+  if (paraBlocks > maxAllowedParaBlocks) {
+    issues.push(
+      `ON AIR structure: ${paraBlocks} paragraph block(s) before sign-off — max **${maxAllowedParaBlocks}** (${targetCount} picked beats + neighborhood close). Cover **only** the picked stories.`
+    );
+  }
+  issues.push(...validateUnsourcedBrandMentions(onAir, selectedStories));
+  issues.push(...validateBannedOnAirPadding(onAir));
+  issues.push(...validateStoryAnchorsInOnAir(onAir, selectedStories));
+  const bizMentions = countBusinessMentions(onAir, localBizName);
+  if (bizMentions !== 1) {
+    issues.push(`ON AIR must mention "${localBizName}" exactly once; got ${bizMentions}.`);
+  }
+  const beatCount = countApproxNewsBeats(onAir);
+  if (beatCount > targetCount + 2) {
+    issues.push(
+      `ON AIR appears to contain too many beats (${beatCount}); keep to ${targetCount} story beats plus close.`
+    );
+  }
+  const words = countOnAirWords(onAir);
+  const { min, max } = pickModeWordBounds(targetCount);
+  if (words > max) {
+    issues.push(
+      `ON AIR is too long (${words} words); trim so total between START and END is ${min}–${max} words.`
+    );
+  }
+  if (words < min) {
+    issues.push(
+      `ON AIR is too short (${words} words); expand to ${min}–${max} words (one concrete detail per beat where thin).`
+    );
+  }
   return issues;
 }
 
@@ -1331,8 +1409,10 @@ async function runNewsAgent() {
   );
 
   const cultureMode = cultureSectionMode();
-  const fetchSkate = cultureMode !== 'LOCAL';
-  const fetchLocal = cultureMode !== 'SKATE';
+  // Pick mode shows everything fresh, so always pull both culture lanes regardless of CULTURE_SECTION_MODE.
+  const pickModeFetch = process.env.PICK_MODE?.trim() === '1';
+  const fetchSkate = pickModeFetch || cultureMode !== 'LOCAL';
+  const fetchLocal = pickModeFetch || cultureMode !== 'SKATE';
 
   /** Repair-first pool: bench fixes, right-to-repair, teardowns, serviceability. */
   const repairFeeds = [
@@ -1461,26 +1541,11 @@ async function runNewsAgent() {
     return true;
   });
 
-  collected = collected.filter((c) => passesBitcoinOnlyCurrencyRule(c.title));
-  const droppedOffScope: string[] = [];
-  collected = collected.filter((c) => {
-    const ok = passesEditorialScopeRule(c);
-    if (!ok) droppedOffScope.push(`[${c.section}] ${c.title}`);
-    return ok;
-  });
-  if (droppedOffScope.length) {
-    console.warn(
-      'Dropped off-scope headlines (non-tech within TECH/HARDWARE feeds):\n' +
-        droppedOffScope.join('\n')
-    );
-  }
+  // PICK_MODE=1: the editor cherry-picks stories in a local web picker. Rules become
+  // advisory badges (everything fresh is shown); Gemini just writes for the chosen set.
+  const pickMode = process.env.PICK_MODE?.trim() === '1';
 
-  if (!collected.length) {
-    throw new Error(
-      'All candidate stories were filtered out by freshness, editorial scope, Bitcoin-only currency rule, undated items (set ALLOW_UNDATED_FEED_ITEMS=1 only if a feed omits dates), or repeat rules. Try MAX_STORY_AGE_HOURS_* , BITCOIN_ONLY_CURRENCY_RULE=0, or STORY_REPEAT_COOLDOWN_DAYS.'
-    );
-  }
-
+  // Cross-day anti-repeat memory + skate cadence (shared by normal + pick mode).
   const cooldownDays = Math.min(
     21,
     Math.max(3, parseInt(process.env.STORY_REPEAT_COOLDOWN_DAYS ?? '7', 10) || 7)
@@ -1494,28 +1559,126 @@ async function runNewsAgent() {
     return d ? now - d.getTime() <= 30 * 24 * 60 * 60 * 1000 : false;
   });
   const skateCadenceDays = weeklySkateCadenceDays();
-  const skateBeatRecentlyAired = hasRecentSkateBeat(recentLog, now, skateCadenceDays);
+  const skateBeatRecentlyAired = pickMode
+    ? false
+    : hasRecentSkateBeat(recentLog, now, skateCadenceDays);
 
-  collected = collected.filter((c) => {
+  const recentlyAired = (c: Collected): boolean => {
     const fp = titleFingerprint(c.title);
     const pk = productKey(c.title);
-    const repeats = recentLog.filter((e) => e.fingerprint === fp || (pk && e.productKey === pk));
-    const hasCooldownHit = repeats.some((e) => {
+    const repeats = recentLog.filter(
+      (e) => e.fingerprint === fp || (pk && e.productKey === pk)
+    );
+    return repeats.some((e) => {
       const d = parseDateSafe(e.airedAt);
       return d ? now - d.getTime() < cooldownMs : false;
     });
-    if (!hasCooldownHit) return true;
-    return hasReturnTrigger(c.title);
-  });
+  };
 
-  // Newest-first in the numbered list so the model reaches for fresh headlines first.
+  if (pickMode) {
+    console.log(
+      `PICK_MODE=1 — showing every fresh candidate (Bitcoin-only / editorial-scope / cooldown drops are advisory only); ${collected.length} fresh candidate(s).`
+    );
+  } else {
+    collected = collected.filter((c) => passesBitcoinOnlyCurrencyRule(c.title));
+    const droppedOffScope: string[] = [];
+    collected = collected.filter((c) => {
+      const ok = passesEditorialScopeRule(c);
+      if (!ok) droppedOffScope.push(`[${c.section}] ${c.title}`);
+      return ok;
+    });
+    if (droppedOffScope.length) {
+      console.warn(
+        'Dropped off-scope headlines (non-tech within TECH/HARDWARE feeds):\n' +
+          droppedOffScope.join('\n')
+      );
+    }
+    collected = collected.filter((c) => {
+      if (!recentlyAired(c)) return true;
+      return hasReturnTrigger(c.title);
+    });
+  }
+
+  if (!collected.length) {
+    throw new Error(
+      'All candidate stories were filtered out by freshness, editorial scope, Bitcoin-only currency rule, undated items (set ALLOW_UNDATED_FEED_ITEMS=1 only if a feed omits dates), or repeat rules. Try MAX_STORY_AGE_HOURS_* , BITCOIN_ONLY_CURRENCY_RULE=0, or STORY_REPEAT_COOLDOWN_DAYS.'
+    );
+  }
+
+  // Newest-first in the numbered list so the freshest headlines lead.
   collected.sort((a, b) => {
     const ta = parseDateSafe(a.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
     const tb = parseDateSafe(b.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
     return tb - ta;
   });
 
-  const storyListText = collected
+  // Pick mode: hand the fresh candidate list to the local web picker and let the editor cherry-pick.
+  let pickedIndices: number[] = [];
+  if (pickMode) {
+    const { pickArticlesInteractive } = await import('./lib/article_picker');
+    const candidates = collected.map((c, i) => {
+      const d = parseDateSafe(c.date);
+      const ageHours = d ? (now - d.getTime()) / 3_600_000 : null;
+      const flags: string[] = [];
+      if (!passesBitcoinOnlyCurrencyRule(c.title)) flags.push('non-bitcoin');
+      if (!passesEditorialScopeRule(c)) flags.push('off-scope');
+      if (recentlyAired(c) && !hasReturnTrigger(c.title)) flags.push('recently aired');
+      if (!c.link) flags.push('no link');
+      return {
+        index: i + 1,
+        section: c.section,
+        feedTitle: c.feedTitle,
+        title: c.title,
+        link: c.link,
+        date: c.date,
+        ageHours,
+        flags,
+      };
+    });
+    pickedIndices = await pickArticlesInteractive(candidates, {
+      dateLabel: getChicagoEpisodeNow().toLocaleDateString('en-US', {
+        timeZone: 'America/Chicago',
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      }),
+    });
+    if (!pickedIndices.length) {
+      throw new Error('No articles selected in the picker — nothing to generate.');
+    }
+    // Source links / blog rows need a real URL; drop any "no link" picks so the
+    // story count stays consistent with what Gemini writes and what gets published.
+    const droppedNoLink = pickedIndices.filter(
+      (idx) => !collected[idx - 1]?.link?.trim()
+    );
+    if (droppedNoLink.length) {
+      pickedIndices = pickedIndices.filter(
+        (idx) => !!collected[idx - 1]?.link?.trim()
+      );
+      console.warn(
+        `Picked stor${droppedNoLink.length === 1 ? 'y' : 'ies'} with no URL dropped (can't build source links): ${droppedNoLink.join(', ')}`
+      );
+    }
+    if (!pickedIndices.length) {
+      throw new Error(
+        'All selected articles were missing URLs — nothing publishable to generate.'
+      );
+    }
+    console.log(
+      `Editor picked ${pickedIndices.length} stor${pickedIndices.length === 1 ? 'y' : 'ies'}: ${pickedIndices.join(', ')}`
+    );
+  }
+
+  // Flexible count in pick mode; fixed lineup otherwise.
+  const targetSourceStories = pickMode
+    ? pickedIndices.length
+    : TARGET_SOURCE_STORIES;
+
+  // Prompt lists only the editor's picks (renumbered 1..N) in pick mode; the full pool otherwise.
+  const promptStoryRows = pickMode
+    ? pickedIndices.map((idx) => collected[idx - 1]!)
+    : collected;
+  const storyListText = promptStoryRows
     .map((c, i) => {
       const n = i + 1;
       const url = c.link || '(no URL in feed)';
@@ -1574,7 +1737,54 @@ async function runNewsAgent() {
 2) **Optional fourth flavor:** Either (**a**) **one sports beat only** — **exactly one [LOCAL]** *or* **exactly one [SKATE]** (**never both**) placed **first or last** in your comma list (usually **last** before close), **or** (**b**) a **fourth core** pick instead — four headlines all **[REPAIR]/[TECH]/[HARDWARE]** when Wolves/skate don’t earn air.
 3) **CLOSE** — Linden Hills color + **one spoken mention** of today’s neighborhood business (see block below), then fixed END lines.`;
 
-  const prompt = `
+  const pickSourcesLine = pickedIndices.map((_, i) => i + 1).join(',');
+  const pickWordBounds = pickModeWordBounds(targetSourceStories);
+  const pickPrompt = `
+You are a **direct, plain-spoken** tech reporter at your repair bench in Linden Hills (Minneapolis) — calm morning desk, not hype.
+
+The editor hand-picked today's stories. Cover **every one**, **one beat each**, in the **order given** — do not add, drop, merge, or reorder.
+
+EDITOR-PICKED STORIES (numbered 1..${targetSourceStories}, in on-air / slide order):
+${storyListText}
+
+QUALITY RULES:
+- **Cover all ${targetSourceStories}, one beat each, in order.** Each numbered story gets **its own paragraph** with at least one distinctive keyword from that headline. Never merge two picks into one paragraph (even if they share a brand like Apple).
+- **<<<SOURCES>>>:** output exactly \`${pickSourcesLine}\` (every listed number, in order).
+- **Cover the headline as written.** If a pick is a Timberwolves story, say Timberwolves / Wolves; if it's a skate story, say skate/skateboarding or the outlet (e.g. Thrasher). Do not invent products, prices, or dates.
+- **Recency:** treat each as today's desk; don't frame as "yesterday/overnight." If a headline carries an old year, frame as "making the rounds again," not fresh news.
+- **Length (non-negotiable):** one vertical take, calm read — ${targetSourceStories} sourced beats plus neighborhood close. Budget ~${pickWordBounds.min}–${pickWordBounds.max} spoken words between the fixed START and END lines (ALL CAPS reads slow — stay lean). If over budget, shorten each beat before dropping the **${localBizName}** mention.
+- **No extra headlines:** cover **only** the ${targetSourceStories} picked stories. No bonus or side mentions.
+- **One pick = one beat (hard):** each numbered story is a different URL / slide; give each its own paragraph.
+- **Banned hype / podcast clichés (ON AIR and social — never say or echo):** "hold on to your hat(s)," "buckle up," "deep dive," "let's dive in," "fire hose," "grab your popcorn," "you won't believe," "crazy," "insane" (unless the headline literally uses it), "first up," "meanwhile," "next up," "finally," "wrapping up," "on the hardware front," "speaking of hardware," "that's the tech wrap," or any "fasten your seatbelts" padding. Sound like a colleague at the bench, not a trailer voice.
+- **Local business (every episode):** after your ${targetSourceStories} beats, the ON AIR close **must** name **${localBizName}** once (see LINDEN HILLS block) — not filler.
+
+You are writing for one **on-air column only** (teleprompter / VO).
+${localColorBlock}
+
+**COLUMN B — ON AIR (teleprompter / voiceover — spoken words only):**
+- **ALL CAPS.** Each story is **1–3 short lines** max **inside its own paragraph** (one paragraph per picked story): headline essence + **why it matters** + one concrete detail only when it fits. No long paragraphs, **no multi-story mashups**.
+- **Single continuous take** — flows straight through after the open; no "coming up / we've also got" runway; no "first story / next up / finally / meanwhile" padding.
+- **Do not** put [B-ROLL] or shot notes in ON AIR.
+- START exactly: LIVE FROM THE BENCH IN LINDEN HILLS, I'M KYLE. AND WE'VE GOT A LOT HITTING THE SHOP TODAY.
+- **Enunciation (INLINE):** phonetic in parentheses on first mention only next to the word — short; stress in ALL CAPS. Examples: OPENAI (oh-PEN-eye). Real acronyms spelled: A I, G P U.
+- **Close:** after your last news beat, before the two fixed END lines: one tight ALL CAPS line (two only if still under word budget) mixing Linden Hills color with **${localBizName}** spoken once by name (required — see LINDEN HILLS block). A light plug is okay; keep it specific to business type, no hard sell.
+- END exactly (literal, final two sentences of ON AIR): BACK TO THE SOLDERING IRON. CATCH YOU TOMORROW.
+
+---
+
+**OUTPUT FORMAT (exactly three blocks, in this order — use these marker lines literally):**
+
+<<<ON_AIR>>>
+(ALL CAPS — one calm take, ~${pickWordBounds.min}–${pickWordBounds.max} words between START and END; spoken order matches the numbered list beat-for-beat, then neighborhood close with **${localBizName}** once before **BACK TO THE SOLDERING IRON**.)
+
+<<<SOURCES>>>
+(Exactly one line: \`${pickSourcesLine}\` — every picked number in order.)
+
+<<<SOCIAL>>>
+(**Body text only** — no "Tech News Daily with Kyle · date" line, no hashtags (the system adds one row). Max ~280 characters. Clean grammar, real sentences, **sentence case** (capitalize first word + proper nouns only), no ALL CAPS. Standard tech spellings fine (OpenAI, iPhone, GPU). 1–2 tight sentences echoing **specific topics** you actually covered — not generic filler.)
+`;
+
+  const normalPrompt = `
 You are a **direct, plain-spoken** tech reporter at your repair bench in Linden Hills (Minneapolis) — calm morning desk, not hype. You cover **Apple** when a numbered headline warrants it — never stitch multiple Apple URLs into one VO beat.
 
 NUMBERED STORIES FOR TODAY — **sorted newest-first**, **each line is numbered 1, 2, 3…** Use those numbers in **<<<SOURCES>>>** (same number = same story = same email JPEG / slide):
@@ -1625,6 +1835,8 @@ ${localColorBlock}
 <<<SOCIAL>>>
 (**Body text only** — do **not** repeat the “Tech News Daily with Kyle · date” line; do **not** include hashtags; the system adds one hashtag row automatically. Max **~280 characters**. Write **properly**: clean grammar, real sentences (no fragments), correct capitalization (no random lowercase “i”), and normal punctuation. **Write in sentence case** (normal Facebook / Instagram style): capitalize the first word and proper nouns only. **Do not** use ALL CAPS, title case for the whole paragraph, or fake emphasis — platforms flag shouty text as low quality. Standard tech spellings are fine (OpenAI, iPhone, GPU). No “link in bio,” no explaining screenshots. 1–2 tight sentences echoing **specific topics** you actually covered — product names, Wolves, skate, bench vibe — not generic filler.)
 `;
+
+  const prompt = pickMode ? pickPrompt : normalPrompt;
 
   const geminiKey = process.env.GEMINI_API_KEY;
   if (!geminiKey) {
@@ -1731,7 +1943,9 @@ ${localColorBlock}
     8,
     Math.max(1, parseInt(process.env.GEMINI_VALIDATION_RETRIES ?? '4', 10) || 4)
   );
-  const onAirBoundsRetryHint = onAirWordBounds();
+  const onAirBoundsRetryHint = pickMode
+    ? pickModeWordBounds(targetSourceStories)
+    : onAirWordBounds();
   let rawOut = '';
   let fixedOnAir = '';
   let onAirForEmail = '';
@@ -1750,82 +1964,96 @@ ${localColorBlock}
             .map((i) => `- ${i}`)
             .join(
               '\n'
-            )}\nRegenerate all three blocks now, following the exact markers.\n- **Word budget:** Between START and END lines only — aim ~155–185 spoken words so total stays inside automation bounds after injections (roughly ${onAirBoundsRetryHint.min}–${onAirBoundsRetryHint.max} words including Wolves/skate repair lines if inserted).\n- If too long: shorten **every** beat before trimming Wolves/skate or close.\n- If too short: one vivid detail per story beat (still ALL CAPS, calm bench tone).`;
+            )}\nRegenerate all three blocks now, following the exact markers.\n- **Word budget:** Between START and END lines only — aim for roughly ${onAirBoundsRetryHint.min}–${onAirBoundsRetryHint.max} spoken words so the total stays inside automation bounds.\n- If too long: shorten **every** beat before trimming the close.\n- If too short: one vivid detail per story beat (still ALL CAPS, calm bench tone).`;
     rawOut = await generateWithBackoff(requestText);
     const parsed = parseStudioOutput(rawOut, collected.length);
     fixedOnAir = parsed.onAir.trim();
     geminiVideoPrompt = parsed.videoPrompt.trim();
-    const uniqParsed = toOrderedUniqueSourceIndices(
-      parsed.indices,
-      collected.length
-    );
-    indices = enforceSourceSectionCaps(
-      uniqParsed,
-      collected,
-      TARGET_SOURCE_STORIES
-    );
-    indices = enforceWeeklySkateCadence(
-      indices,
-      collected,
-      TARGET_SOURCE_STORIES,
-      shouldRequireSkateBeat,
-      fixedOnAir
-    );
-    indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
-    indices = enforceWolvesSourceWhenMentioned(
-      indices,
-      collected,
-      TARGET_SOURCE_STORIES,
-      fixedOnAir,
-      shouldRequireSkateBeat
-    );
-    indices = enforceWeeklySkateCadence(
-      indices,
-      collected,
-      TARGET_SOURCE_STORIES,
-      shouldRequireSkateBeat,
-      fixedOnAir
-    );
-    indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
-    const programmaticSourceFillIns = indices.filter(
-      (i) => !uniqParsed.includes(i)
-    );
     modelSocial = parsed.social;
     onAirForEmail = ensureLocalBusinessInOnAir(fixedOnAir, localBizName);
-    finalSegments = buildFinalSegments(indices, collected);
-    const selectedStories = finalSegments.map((s) => s.row);
-    validationIssues = validateStudioOutput(
-      onAirForEmail,
-      indices,
-      localBizName,
-      selectedStories,
-      shouldRequireSkateBeat,
-      cultureMode,
-      fixedOnAir
-    );
-    const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
-    const hasSkateSelected = selectedStories.some((s) => s.section === 'SKATE');
-    if (onAirReferencesWolvesBeat(fixedOnAir) && !hasWolvesSelected) {
-      validationIssues.push(
-        'ON AIR mentions Wolves but final segment list has no LOCAL source row.'
+
+    if (pickMode) {
+      // Editor already chose the lineup — force it and skip composition enforcement.
+      indices = pickedIndices;
+      finalSegments = buildFinalSegments(indices, collected);
+      const selectedStories = finalSegments.map((s) => s.row);
+      validationIssues = validatePickModeOutput(
+        onAirForEmail,
+        localBizName,
+        selectedStories,
+        targetSourceStories
       );
-    }
-    if (onAirReferencesSkateBeat(fixedOnAir) && !hasSkateSelected) {
-      validationIssues.push(
-        'ON AIR mentions skate but final segment list has no SKATE source row.'
+    } else {
+      const uniqParsed = toOrderedUniqueSourceIndices(
+        parsed.indices,
+        collected.length
       );
-    }
-    if (programmaticSourceFillIns.length) {
-      const fillInMsg = `<<<SOURCES>>> required programmatic fill-in for story number(s) ${programmaticSourceFillIns.join(', ')} — emit exactly ${TARGET_SOURCE_STORIES} distinct valid indices with real URLs (at most one sports pick: [LOCAL] XOR [SKATE]; no duplicate numbers).`;
-      if (pass <= maxValidationRetries) {
-        validationIssues.push(fillInMsg);
-      } else {
-        console.warn(fillInMsg);
+      indices = enforceSourceSectionCaps(
+        uniqParsed,
+        collected,
+        TARGET_SOURCE_STORIES
+      );
+      indices = enforceWeeklySkateCadence(
+        indices,
+        collected,
+        TARGET_SOURCE_STORIES,
+        shouldRequireSkateBeat,
+        fixedOnAir
+      );
+      indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
+      indices = enforceWolvesSourceWhenMentioned(
+        indices,
+        collected,
+        TARGET_SOURCE_STORIES,
+        fixedOnAir,
+        shouldRequireSkateBeat
+      );
+      indices = enforceWeeklySkateCadence(
+        indices,
+        collected,
+        TARGET_SOURCE_STORIES,
+        shouldRequireSkateBeat,
+        fixedOnAir
+      );
+      indices = enforceSourcesHaveLinks(indices, collected, TARGET_SOURCE_STORIES);
+      const programmaticSourceFillIns = indices.filter(
+        (i) => !uniqParsed.includes(i)
+      );
+      finalSegments = buildFinalSegments(indices, collected);
+      const selectedStories = finalSegments.map((s) => s.row);
+      validationIssues = validateStudioOutput(
+        onAirForEmail,
+        indices,
+        localBizName,
+        selectedStories,
+        shouldRequireSkateBeat,
+        cultureMode,
+        fixedOnAir
+      );
+      const hasWolvesSelected = selectedStories.some((s) => s.section === 'LOCAL');
+      const hasSkateSelected = selectedStories.some((s) => s.section === 'SKATE');
+      if (onAirReferencesWolvesBeat(fixedOnAir) && !hasWolvesSelected) {
+        validationIssues.push(
+          'ON AIR mentions Wolves but final segment list has no LOCAL source row.'
+        );
+      }
+      if (onAirReferencesSkateBeat(fixedOnAir) && !hasSkateSelected) {
+        validationIssues.push(
+          'ON AIR mentions skate but final segment list has no SKATE source row.'
+        );
+      }
+      if (programmaticSourceFillIns.length) {
+        const fillInMsg = `<<<SOURCES>>> required programmatic fill-in for story number(s) ${programmaticSourceFillIns.join(', ')} — emit exactly ${TARGET_SOURCE_STORIES} distinct valid indices with real URLs (at most one sports pick: [LOCAL] XOR [SKATE]; no duplicate numbers).`;
+        if (pass <= maxValidationRetries) {
+          validationIssues.push(fillInMsg);
+        } else {
+          console.warn(fillInMsg);
+        }
       }
     }
     if (hasAdjacentDuplicateNewsParagraphs(fixedOnAir)) {
       validationIssues.push(
-        `ON AIR has two consecutive duplicate story paragraphs — remove the repeated block; each of the ${TARGET_SOURCE_STORIES} story beats must cover a different pick.`
+        `ON AIR has two consecutive duplicate story paragraphs — remove the repeated block; each of the ${targetSourceStories} story beats must cover a different pick.`
       );
     }
     if (!validationIssues.length) break;
@@ -1833,6 +2061,39 @@ ${localColorBlock}
       console.warn(
         `Gemini output failed validation (pass ${pass}/${maxValidationRetries + 1}); retrying:\n${validationIssues.join('\n')}`
       );
+    }
+  }
+
+  if (!pickMode && validationIssues.length) {
+    // Last-resort rescue: the most common cause of exhausting all retries is a
+    // forced sports pick (weekly skate cadence / Wolves) that the model lists in
+    // <<<SOURCES>>> but never *speaks* in ON AIR. autoRepairOnAirCultureMismatch
+    // already injects a spoken "SKATEBOARDING BEAT —" / "TIMBERWOLVES BEAT —" line
+    // for exactly this, but normally only runs after this throw. Apply it here and
+    // re-validate so a flaky culture-beat alignment ships an episode instead of
+    // hard-failing CI (no email at all).
+    const rescued = autoRepairOnAirCultureMismatch(
+      onAirForEmail,
+      finalSegments,
+      localBizName
+    );
+    const rescuedIssues = validateStudioOutput(
+      rescued,
+      indices,
+      localBizName,
+      finalSegments.map((s) => s.row),
+      shouldRequireSkateBeat,
+      cultureMode,
+      rescued
+    );
+    if (!rescuedIssues.length) {
+      console.warn(
+        'Validation cleared via culture-beat auto-repair (injected spoken sports line) instead of failing — original issues:\n' +
+          validationIssues.join('\n')
+      );
+      onAirForEmail = rescued;
+      fixedOnAir = rescued;
+      validationIssues = [];
     }
   }
 
@@ -1858,10 +2119,11 @@ ${localColorBlock}
    * (legacy heuristic; can diverge from the model’s `<<<SOURCES>>>` line).
    */
   const orderedIndices =
-    process.env.USE_ON_AIR_SOURCE_REORDER?.trim() === '1'
+    !pickMode && process.env.USE_ON_AIR_SOURCE_REORDER?.trim() === '1'
       ? reorderIndicesToMatchOnAir(indices, collected, fixedOnAir)
       : indices;
   if (
+    !pickMode &&
     process.env.USE_ON_AIR_SOURCE_REORDER?.trim() === '1' &&
     orderedIndices.join(',') !== indices.join(',')
   ) {
@@ -1952,15 +2214,18 @@ ${localColorBlock}
     )
   );
 
-  if (!resendKey) {
-    throw new Error('Set RESEND_API_KEY');
-  }
-  if (!toRaw) {
-    throw new Error('Set RESEND_TO to your inbox (comma-separated ok).');
+  const skipResend = process.env.SKIP_RESEND?.trim() === '1';
+  if (!skipResend) {
+    if (!resendKey) {
+      throw new Error('Set RESEND_API_KEY');
+    }
+    if (!toRaw) {
+      throw new Error('Set RESEND_TO to your inbox (comma-separated ok).');
+    }
   }
 
-  const to = toRaw.split(',').map((a) => a.trim()).filter(Boolean);
-  const resend = new Resend(resendKey);
+  const to = toRaw?.split(',').map((a) => a.trim()).filter(Boolean) ?? [];
+  const resend = resendKey ? new Resend(resendKey) : null;
 
   const tickerLine = await getTickerData();
 
@@ -2029,55 +2294,59 @@ ${localColorBlock}
     | undefined;
   let lastSendErr: { name?: string; message?: string } | undefined;
 
-  for (const from of fromCandidates) {
-    for (let attempt = 1; attempt <= resendMaxAttempts; attempt++) {
-      const res = await resend.emails.send({
-        from,
-        to,
-        subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`,
-        text: emailText,
-        html: emailHtml,
-      });
+  if (skipResend) {
+    console.log('SKIP_RESEND=1 — email skipped; continuing to web publish.');
+  } else {
+    for (const from of fromCandidates) {
+      for (let attempt = 1; attempt <= resendMaxAttempts; attempt++) {
+        const res = await resend!.emails.send({
+          from,
+          to,
+          subject: `📺 Your News Script for ${getChicagoEpisodeNow().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`,
+          text: emailText,
+          html: emailHtml,
+        });
 
-      if (!res.error) {
-        sendData = res.data;
-        lastSendErr = undefined;
-        break;
-      }
-
-      lastSendErr = {
-        name: res.error.name,
-        message: res.error.message,
-      };
-      const retryable = isRetryableResendError(lastSendErr);
-      const appMissing = isResendApplicationNotFound(lastSendErr);
-
-      if (appMissing) {
-        if (from !== fromCandidates[fromCandidates.length - 1]) {
-          console.warn(
-            `Resend sender "${from}" unavailable (${lastSendErr.message}). Trying fallback sender…`
-          );
+        if (!res.error) {
+          sendData = res.data;
+          lastSendErr = undefined;
+          break;
         }
-        break;
-      }
-      if (!retryable || attempt >= resendMaxAttempts) {
-        break;
+
+        lastSendErr = {
+          name: res.error.name,
+          message: res.error.message,
+        };
+        const retryable = isRetryableResendError(lastSendErr);
+        const appMissing = isResendApplicationNotFound(lastSendErr);
+
+        if (appMissing) {
+          if (from !== fromCandidates[fromCandidates.length - 1]) {
+            console.warn(
+              `Resend sender "${from}" unavailable (${lastSendErr.message}). Trying fallback sender…`
+            );
+          }
+          break;
+        }
+        if (!retryable || attempt >= resendMaxAttempts) {
+          break;
+        }
+
+        const parsedRetryAfter = parseRetryAfterSeconds(lastSendErr.message ?? '');
+        const waitSec = parsedRetryAfter ?? Math.min(12 * attempt, 60);
+        console.warn(
+          `Resend send failed (${lastSendErr.name ?? 'error'}). Waiting ${waitSec}s — retry ${attempt + 1}/${resendMaxAttempts}…`
+        );
+        await new Promise((r) => setTimeout(r, waitSec * 1000));
       }
 
-      const parsedRetryAfter = parseRetryAfterSeconds(lastSendErr.message ?? '');
-      const waitSec = parsedRetryAfter ?? Math.min(12 * attempt, 60);
-      console.warn(
-        `Resend send failed (${lastSendErr.name ?? 'error'}). Waiting ${waitSec}s — retry ${attempt + 1}/${resendMaxAttempts}…`
-      );
-      await new Promise((r) => setTimeout(r, waitSec * 1000));
+      if (!lastSendErr) break;
+      if (!isResendApplicationNotFound(lastSendErr)) break;
     }
 
-    if (!lastSendErr) break;
-    if (!isResendApplicationNotFound(lastSendErr)) break;
-  }
-
-  if (lastSendErr) {
-    throw new Error(`Resend: ${lastSendErr.message} (${lastSendErr.name})`);
+    if (lastSendErr) {
+      throw new Error(`Resend: ${lastSendErr.message} (${lastSendErr.name})`);
+    }
   }
 
   const webDir = process.env.TECHNEWS_WEB_DIR?.trim();
@@ -2147,7 +2416,11 @@ ${localColorBlock}
     await writeAirLog(airLogPath, merged);
   }
 
-  console.log('Mission accomplished. Resend id:', sendData?.id);
+  console.log(
+    skipResend
+      ? 'Mission accomplished (web publish only).'
+      : `Mission accomplished. Resend id: ${sendData?.id}`
+  );
   if (linksText) {
     console.log('\n--- Segment links ---\n' + linksText);
   }

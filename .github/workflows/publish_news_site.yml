@@ -2,10 +2,7 @@
 # Daily workflow now handles the post JSON update automatically on email send.
 # This workflow only verifies/syncs the YouTube Short into existing `public/news`.
 #
-# Triggers:
-#   - schedule (daily): auto-discovers the Short for today's manifest slug after the
-#     user's 8:00 AM Chicago upload deadline. Uses --allow-missing so a not-yet-
-#     indexed video doesn't fail the run; the retry loop also waits up to ~15 min.
+# Triggers (manual-only — the daily cron was removed):
 #   - workflow_dispatch (manual): leave the slug input blank to use the newest
 #     manifest slug (post-film flow), or pass YYYY-MM-DD to backfill an older
 #     episode (e.g. you uploaded the Short late or replaced it).
@@ -13,12 +10,6 @@
 name: Publish Tech News to Instakyle
 
 'on':
-  schedule:
-    # GitHub cron is UTC. 15 13 * * * ≈ 8:15 AM America/Chicago during CDT
-    # (≈ 7:15 AM during CST — switch to '15 14 * * *' in winter if you want
-    # 8:15 AM local year-round). Runs ~15 min after the 8:00 AM upload deadline
-    # to give YouTube time to index the Short for search-by-token.
-    - cron: '15 13 * * *'
   workflow_dispatch:
     inputs:
       slug:

@@ -1,13 +1,8 @@
 name: Daily Tech News Agent
 
 # Quote `on` so strict YAML parsers don't treat it as boolean true (YAML 1.1)
+# Manual-only: the daily cron + push triggers were removed — run via Actions → Run workflow.
 'on':
-  push:
-    branches: [main]
-  schedule:
-    # GitHub cron is UTC only. 0 10 * * * ≈ 5:00 AM America/Chicago during CDT (roughly Mar–Nov).
-    # During CST (winter) the same cron is ≈ 4:00 AM Chicago — switch to 0 11 * * * for ~5:00 AM CST (then ~6:00 AM CDT).
-    - cron: '0 10 * * *'
   workflow_dispatch:
     inputs:
       chicago_date:
