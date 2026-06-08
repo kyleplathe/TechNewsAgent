@@ -56,7 +56,7 @@ The agent does **not** capture or attach JPEGs. Grab article stills yourself (Sa
 
 ## Voiceover length (~90s desk)
 
-Target **one take ~90s** (**~85–95s** window; prompt budgets **~175–215 spoken words** between fixed START/END). **3 stories in `<<<SOURCES>>>` typical, 4 maximum.** Story list in the prompt is **newest-first** so the model favors fresh headlines. Best practice: **one beat → one point → one proof** on main stories; optional skate/Wolves kept to **one sentence** when both appear. Close stays short (neighborhood + sign-off). Gemini prompt steers **away** from hype / podcast clichés — calm bench voice, not trailer energy.
+Target **one take ~90s** (**~85–95s** window; prompt budgets **~175–215 spoken words** between fixed START/END). **3 stories in `<<<SOURCES>>>` typical, 4 maximum.** Story list in the prompt is **newest-first** so the model favors fresh headlines. Best practice: **one beat → one point → one proof** on main stories; optional skate/Wolves kept to **one sentence** when both appear. Close stays short (neighborhood + sign-off). Gemini prompt steers **away** from hype / podcast clichés — calm bench voice, not trailer energy. Both prompts also carry a shared **no-AI-slop** block (`antiSlopRules` in `tech_news_agent.ts`, adapted from [realrossmanngroup/no_ai_slop_writing_rules](https://github.com/realrossmanngroup/no_ai_slop_writing_rules)) that bans contrast clichés ("it's not X, it's Y"), hollow profundity / inflated symbolism, empty intensifiers, marketing verbs/adjectives, and rhetorical colon hooks — for **ON AIR and social** — and pushes beats to end on a concrete detail.
 
 ## CI schedule
 

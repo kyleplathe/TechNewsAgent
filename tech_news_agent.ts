@@ -1737,6 +1737,18 @@ async function runNewsAgent() {
 2) **Optional fourth flavor:** Either (**a**) **one sports beat only** — **exactly one [LOCAL]** *or* **exactly one [SKATE]** (**never both**) placed **first or last** in your comma list (usually **last** before close), **or** (**b**) a **fourth core** pick instead — four headlines all **[REPAIR]/[TECH]/[HARDWARE]** when Wolves/skate don’t earn air.
 3) **CLOSE** — Linden Hills color + **one spoken mention** of today’s neighborhood business (see block below), then fixed END lines.`;
 
+  // No-AI-slop writing rules (adapted for spoken VO + social caption) — based on
+  // github.com/realrossmanngroup/no_ai_slop_writing_rules. Keep both prompts in sync.
+  const antiSlopRules = `- **No-AI-slop writing (ON AIR and social — sound like a person at the bench, not a model):**
+  - **No contrast clichés:** never "it's not X, it's Y," "this isn't X, it's Y," or "the issue isn't X, it's Y." Just say what the thing is.
+  - **No hollow profundity / inflated symbolism:** drop "a stark reminder," "a testament to," "watershed moment," "left its mark," "ushers in a new era," "game-changer," "the future of." Say the concrete fact instead (a number, vendor, part, date).
+  - **No empty intensifiers / filler:** cut "significantly," "dramatically," "incredibly," "truly," "really," "very," "basically," "essentially," "literally," "absolutely." Replace with the actual figure or detail.
+  - **No marketing verbs/adjectives:** avoid "delve," "leverage," "utilize," "unveil," "underscore," "streamline," plus "robust," "seamless," "cutting-edge," "groundbreaking," "revolutionary." Use plain words (use, show, reveal, strong, new).
+  - **No rhetorical colon hooks:** never "here's the thing," "the bottom line," "the reality," "the kicker," "plot twist."
+  - **End each beat on a real detail** (a number, vendor, part, price, or date) — not on a line saying something "matters" or is "huge."
+  - **Vary sentence length:** mix short punches with longer lines; don't write every beat the same shape.
+  - **Social caption:** no em dashes (use commas/periods), apply all of the above, plain sentence case.`;
+
   const pickSourcesLine = pickedIndices.map((_, i) => i + 1).join(',');
   const pickWordBounds = pickModeWordBounds(targetSourceStories);
   const pickPrompt = `
@@ -1756,6 +1768,7 @@ QUALITY RULES:
 - **No extra headlines:** cover **only** the ${targetSourceStories} picked stories. No bonus or side mentions.
 - **One pick = one beat (hard):** each numbered story is a different URL / slide; give each its own paragraph.
 - **Banned hype / podcast clichés (ON AIR and social — never say or echo):** "hold on to your hat(s)," "buckle up," "deep dive," "let's dive in," "fire hose," "grab your popcorn," "you won't believe," "crazy," "insane" (unless the headline literally uses it), "first up," "meanwhile," "next up," "finally," "wrapping up," "on the hardware front," "speaking of hardware," "that's the tech wrap," or any "fasten your seatbelts" padding. Sound like a colleague at the bench, not a trailer voice.
+${antiSlopRules}
 - **Local business (every episode):** after your ${targetSourceStories} beats, the ON AIR close **must** name **${localBizName}** once (see LINDEN HILLS block) — not filler.
 
 You are writing for one **on-air column only** (teleprompter / VO).
@@ -1806,6 +1819,7 @@ ${storyPickRule}
 - **Paragraph breaks:** Put a **blank line between every SOURCES beat** and **before** the Linden Hills / **${localBizName}** close — teleprompter paragraphs map 1:1 to slides.
 - **Tight but not thin:** On **main** beats only, add **one concrete detail** when the headline gives you something real (a number, vendor, mechanism) — **no** filler, **no** essay transitions (“building on that,” “wrapping up,” **“first up,” “meanwhile,” “on the hardware front,” “that's the tech wrap,”** “let’s unpack,” **“let’s dive in,”** **“deep dive,”** **“we’ll unpack”**). **Visuals:** screenshot stills only; never promise a full preview or live site scroll; say “on the screenshot” / “in the grab” if needed.
 - **Banned hype / podcast clichés (ON AIR and social — never say or echo):** “hold on to your hat(s),” “buckle up,” “deep dive,” “let’s dive in,” “fire hose,” “grab your popcorn,” “you won’t believe,” “crazy,” “insane” (unless the headline literally uses it), **“first up,” “meanwhile,” “next up,” “finally,” “wrapping up,” “on the hardware front,” “speaking of hardware,” “that's the tech wrap,”** or **any** “fasten your seatbelts” style padding. Sound like a colleague at the bench, not a trailer voice.
+${antiSlopRules}
 - **Local business (every episode):** After your **four <<<SOURCES>>> beats**, the ON AIR close **must** name **${localBizName}** once (see **LINDEN HILLS** block) — **not** filler.
 
 You are writing for one **on-air column only** (teleprompter / VO).
