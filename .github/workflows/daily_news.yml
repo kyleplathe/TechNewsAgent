@@ -9,6 +9,15 @@ name: Daily Tech News Agent
         description: 'Episode date YYYY-MM-DD (America/Chicago); leave empty for “today”. Use to backfill posts.'
         required: false
         type: string
+      list_candidates:
+        description: 'List fresh story candidates (with URLs) and stop — no email/publish. Step 1 of hand-pick.'
+        required: false
+        type: boolean
+        default: false
+      pick_urls:
+        description: 'Hand-pick: paste candidate URLs (comma- or newline-separated) in on-air/slide order. Forces exactly these stories.'
+        required: false
+        type: string
 
 # `contents: read` alone makes every other scope `none`, which blocks artifact upload.
 permissions:
@@ -103,10 +112,14 @@ jobs:
           TECHNEWS_VIDEO_URL: ${{ secrets.TECHNEWS_VIDEO_URL }}
           # Only set when manually dispatched (empty on schedule / push).
           TECHNEWS_CHICAGO_DATE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.chicago_date || '' }}
+          # Hand-pick (CI): list_candidates dumps the fresh candidate list and exits;
+          # pick_urls forces exactly the pasted URLs (order = on-air/slide order).
+          LIST_CANDIDATES: ${{ github.event.inputs.list_candidates == 'true' && '1' || '' }}
+          PICK_URLS: ${{ github.event.inputs.pick_urls }}
         run: npx tsx tech_news_agent.ts
 
       - name: Upload news-site-bundle artifact
-        if: success() && steps.instakyle_news.outputs.dir != ''
+        if: success() && steps.instakyle_news.outputs.dir != '' && github.event.inputs.list_candidates != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: news-site-bundle
@@ -115,7 +128,7 @@ jobs:
           retention-days: 5
 
       - name: Commit and push Instakyle /news (auto mode only)
-        if: steps.instakyle_news.outputs.push_to_instakyle == 'true'
+        if: steps.instakyle_news.outputs.push_to_instakyle == 'true' && github.event.inputs.list_candidates != 'true'
         env:
           FORCE_REPUBLISH: ${{ vars.NEWS_SITE_FORCE_REPUBLISH }}
         working-directory: instakyle-site

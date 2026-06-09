@@ -18,7 +18,7 @@ import {
   pickLocalBusiness,
   type LocalBusiness,
 } from './local_businesses';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 
 function escapeHtml(s: string): string {
   return s
@@ -34,6 +34,43 @@ function normalizeWebsiteUrl(raw: string): string {
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   // Treat bare domains as HTTPS so local spotlight always has a usable URL.
   return `https://${trimmed.replace(/^\/+/, '')}`;
+}
+
+/**
+ * Parse PICK_URLS (CI hand-pick): comma- or newline-separated article URLs.
+ * Order is preserved = on-air / slide order, same contract as the local picker's
+ * selection order.
+ */
+function parsePickUrls(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Canonicalize a URL for matching a PICK_URLS entry against a feed item's link:
+ * drop protocol, leading `www.`, query/hash, and trailing slashes (case-insensitive).
+ * Feed links sometimes carry tracking params the editor's pasted URL won't, so we
+ * compare host+path only.
+ */
+function canonicalizeForMatch(url: string): string {
+  const trimmed = (url ?? '').trim();
+  if (!trimmed) return '';
+  try {
+    const u = new URL(trimmed);
+    const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    const path = u.pathname.replace(/\/+$/, '').toLowerCase();
+    return `${host}${path}`;
+  } catch {
+    return trimmed
+      .replace(/^https?:\/\//i, '')
+      .replace(/^www\./i, '')
+      .split(/[?#]/)[0]!
+      .replace(/\/+$/, '')
+      .toLowerCase();
+  }
 }
 
 /**
@@ -1410,7 +1447,11 @@ async function runNewsAgent() {
 
   const cultureMode = cultureSectionMode();
   // Pick mode shows everything fresh, so always pull both culture lanes regardless of CULTURE_SECTION_MODE.
-  const pickModeFetch = process.env.PICK_MODE?.trim() === '1';
+  // This includes the non-interactive CI variants: PICK_URLS (forced hand-pick) and LIST_CANDIDATES (dump list).
+  const pickModeFetch =
+    process.env.PICK_MODE?.trim() === '1' ||
+    !!process.env.PICK_URLS?.trim() ||
+    process.env.LIST_CANDIDATES?.trim() === '1';
   const fetchSkate = pickModeFetch || cultureMode !== 'LOCAL';
   const fetchLocal = pickModeFetch || cultureMode !== 'SKATE';
 
@@ -1543,7 +1584,12 @@ async function runNewsAgent() {
 
   // PICK_MODE=1: the editor cherry-picks stories in a local web picker. Rules become
   // advisory badges (everything fresh is shown); Gemini just writes for the chosen set.
-  const pickMode = process.env.PICK_MODE?.trim() === '1';
+  // CI variants (no browser): PICK_URLS forces a hand-picked lineup by URL; LIST_CANDIDATES
+  // just prints the fresh candidate list (with URLs) and exits so you can choose.
+  const pickUrls = parsePickUrls(process.env.PICK_URLS);
+  const listOnly = process.env.LIST_CANDIDATES?.trim() === '1';
+  const pickMode =
+    process.env.PICK_MODE?.trim() === '1' || pickUrls.length > 0 || listOnly;
 
   // Cross-day anti-repeat memory + skate cadence (shared by normal + pick mode).
   const cooldownDays = Math.min(
@@ -1612,37 +1658,112 @@ async function runNewsAgent() {
     return tb - ta;
   });
 
-  // Pick mode: hand the fresh candidate list to the local web picker and let the editor cherry-pick.
+  // LIST_CANDIDATES=1 (CI phase 1): dump the fresh candidate list with URLs and exit
+  // before Gemini/email. Copy the URLs you want into the pick_urls input and re-run.
+  if (listOnly) {
+    const candidateLine = (c: Collected, i: number): string => {
+      const d = parseDateSafe(c.date);
+      const ageH = d ? Math.round((now - d.getTime()) / 3_600_000) : null;
+      const age =
+        ageH == null ? 'undated' : ageH < 24 ? `${ageH}h` : `${Math.round(ageH / 24)}d`;
+      const advisory: string[] = [];
+      if (!passesBitcoinOnlyCurrencyRule(c.title)) advisory.push('non-bitcoin');
+      if (!passesEditorialScopeRule(c)) advisory.push('off-scope');
+      if (recentlyAired(c) && !hasReturnTrigger(c.title)) advisory.push('recently aired');
+      if (!c.link?.trim()) advisory.push('no link');
+      const badges = advisory.length ? ` {${advisory.join(', ')}}` : '';
+      return `${i + 1}. [${c.section}] ${c.title} (${age})${badges}\n   ${c.link?.trim() || '(no URL)'}`;
+    };
+    const body = collected.map(candidateLine).join('\n');
+    console.log(
+      `\n=== FRESH CANDIDATES (${collected.length}) — copy the URLs you want (in on-air / slide order) into pick_urls and re-run ===\n${body}\n`
+    );
+    const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+    if (summaryPath) {
+      const md =
+        `## Fresh candidates (${collected.length})\n\n` +
+        `Copy the URLs you want, **in on-air / slide order**, into the **pick_urls** input and re-run this workflow.\n\n` +
+        collected
+          .map((c, i) => {
+            const link = c.link?.trim();
+            return `${i + 1}. **[${c.section}]** ${c.title}\n   - ${link ? link : '_(no URL — can\u2019t be picked)_'}`;
+          })
+          .join('\n') +
+        '\n';
+      await appendFile(summaryPath, md);
+    }
+    console.log(
+      'LIST_CANDIDATES=1 — candidate list only; no script generated. Re-run with pick_urls set to build the episode.'
+    );
+    return;
+  }
+
+  // Pick mode: hand the fresh candidate list to the local web picker (or, in CI, resolve
+  // the editor's pasted URLs) and let the editor cherry-pick.
   let pickedIndices: number[] = [];
   if (pickMode) {
-    const { pickArticlesInteractive } = await import('./lib/article_picker');
-    const candidates = collected.map((c, i) => {
-      const d = parseDateSafe(c.date);
-      const ageHours = d ? (now - d.getTime()) / 3_600_000 : null;
-      const flags: string[] = [];
-      if (!passesBitcoinOnlyCurrencyRule(c.title)) flags.push('non-bitcoin');
-      if (!passesEditorialScopeRule(c)) flags.push('off-scope');
-      if (recentlyAired(c) && !hasReturnTrigger(c.title)) flags.push('recently aired');
-      if (!c.link) flags.push('no link');
-      return {
-        index: i + 1,
-        section: c.section,
-        feedTitle: c.feedTitle,
-        title: c.title,
-        link: c.link,
-        date: c.date,
-        ageHours,
-        flags,
-      };
-    });
-    pickedIndices = await pickArticlesInteractive(candidates, {
-      dateLabel: getChicagoEpisodeNow().toLocaleDateString('en-US', {
-        timeZone: 'America/Chicago',
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-      }),
-    });
+    if (pickUrls.length) {
+      // CI phase 2: forced hand-pick by URL (no browser). Order of pickUrls = on-air order.
+      const canonToIndex = new Map<string, number>();
+      collected.forEach((c, i) => {
+        const key = canonicalizeForMatch(c.link || '');
+        if (key && !canonToIndex.has(key)) canonToIndex.set(key, i + 1);
+      });
+      const unmatched: string[] = [];
+      const seen = new Set<number>();
+      for (const raw of pickUrls) {
+        const idx = canonToIndex.get(canonicalizeForMatch(raw));
+        if (!idx) {
+          unmatched.push(raw);
+          continue;
+        }
+        if (!seen.has(idx)) {
+          seen.add(idx);
+          pickedIndices.push(idx);
+        }
+      }
+      if (unmatched.length) {
+        throw new Error(
+          `pick_urls / PICK_URLS: ${unmatched.length} URL(s) did not match any fresh candidate (they may have aged out or differ from the feed link). ` +
+            `Re-run the list step for current URLs. Unmatched:\n  ${unmatched.join('\n  ')}`
+        );
+      }
+      if (!pickedIndices.length) {
+        throw new Error('pick_urls / PICK_URLS was set but matched no candidates — nothing to generate.');
+      }
+      console.log(
+        `Editor hand-picked ${pickedIndices.length} stor${pickedIndices.length === 1 ? 'y' : 'ies'} by URL (order = on-air order): ${pickedIndices.join(', ')}`
+      );
+    } else {
+      const { pickArticlesInteractive } = await import('./lib/article_picker');
+      const candidates = collected.map((c, i) => {
+        const d = parseDateSafe(c.date);
+        const ageHours = d ? (now - d.getTime()) / 3_600_000 : null;
+        const flags: string[] = [];
+        if (!passesBitcoinOnlyCurrencyRule(c.title)) flags.push('non-bitcoin');
+        if (!passesEditorialScopeRule(c)) flags.push('off-scope');
+        if (recentlyAired(c) && !hasReturnTrigger(c.title)) flags.push('recently aired');
+        if (!c.link) flags.push('no link');
+        return {
+          index: i + 1,
+          section: c.section,
+          feedTitle: c.feedTitle,
+          title: c.title,
+          link: c.link,
+          date: c.date,
+          ageHours,
+          flags,
+        };
+      });
+      pickedIndices = await pickArticlesInteractive(candidates, {
+        dateLabel: getChicagoEpisodeNow().toLocaleDateString('en-US', {
+          timeZone: 'America/Chicago',
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+        }),
+      });
+    }
     if (!pickedIndices.length) {
       throw new Error('No articles selected in the picker — nothing to generate.');
     }
