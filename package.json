@@ -8,6 +8,8 @@
   "scripts": {
     "start": "tsx tech_news_agent.ts",
     "pick": "PICK_MODE=1 tsx tech_news_agent.ts",
+    "pick:publish": "PICK_MODE=1 tsx tech_news_agent.ts && tsx scripts/publish-instakyle.ts",
+    "publish:instakyle": "tsx scripts/publish-instakyle.ts",
     "typecheck": "tsc -p . --noEmit",
     "self-check": "tsx scripts/self-check.ts",
     "test": "npm run typecheck && npm run self-check",

@@ -4,8 +4,9 @@
 #
 # Triggers (manual-only — the daily cron was removed):
 #   - workflow_dispatch (manual): leave the slug input blank to use the newest
-#     manifest slug (post-film flow), or pass YYYY-MM-DD to backfill an older
-#     episode (e.g. you uploaded the Short late or replaced it).
+#     manifest slug (post-film flow). Waits up to ~15 min for YouTube indexing and
+#     exits clean if the Short is not found yet. Pass YYYY-MM-DD to backfill a
+#     specific episode (strict — fails when the token is missing from YouTube).
 
 name: Publish Tech News to Instakyle
 
@@ -81,10 +82,7 @@ jobs:
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
-          # On the daily cron we wait longer + tolerate a not-yet-indexed Short so
-          # the run doesn't fail if the user uploaded slightly late. Manual
-          # dispatches keep stricter defaults so a typo'd slug surfaces as an error.
-          IS_SCHEDULE: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
+          INPUT_SLUG: ${{ github.event.inputs.slug }}
         run: |
           set -e
           SYNC_SLUG="${{ steps.slug.outputs.slug }}"
@@ -92,7 +90,9 @@ jobs:
           if [ -n "${YOUTUBE_CHANNEL_ID}" ]; then
             ARGS+=( --channel-id "${YOUTUBE_CHANNEL_ID}" )
           fi
-          if [ "$IS_SCHEDULE" = "true" ]; then
+          # Post-film default (blank slug): wait for YouTube indexing and exit clean if
+          # the Short is not up yet — same behavior the daily cron used before manual-only.
+          if [ -z "${INPUT_SLUG:-}" ] || [ "${INPUT_SLUG}" = "null" ]; then
             ARGS+=( --allow-missing )
             export YOUTUBE_DISCOVERY_ATTEMPTS=15
             export YOUTUBE_DISCOVERY_SLEEP_MS=60000

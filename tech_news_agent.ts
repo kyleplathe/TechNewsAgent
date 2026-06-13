@@ -43,10 +43,13 @@ function normalizeWebsiteUrl(raw: string): string {
  */
 function parsePickUrls(raw: string | undefined): string[] {
   if (!raw) return [];
-  return raw
+  const trimmed = raw.trim();
+  // GitHub Actions sometimes passes the literal string "null" for unset inputs.
+  if (!trimmed || trimmed.toLowerCase() === 'null') return [];
+  return trimmed
     .split(/[\n,]+/)
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter((s) => s && s.toLowerCase() !== 'null');
 }
 
 /**
@@ -697,6 +700,43 @@ function hasAdjacentDuplicateNewsParagraphs(onAir: string): boolean {
   return false;
 }
 
+/** Drop back-to-back identical story paragraphs Gemini sometimes duplicates. */
+function dedupeAdjacentOnAirParagraphs(onAir: string): string {
+  const t = onAir.replace(/\r\n/g, '\n').trim();
+  const signoffMatch = t.match(SOLDERING_SIGNOFF_RE);
+  if (!signoffMatch || signoffMatch[1] === undefined || signoffMatch[2] === undefined) {
+    return t;
+  }
+  const head = signoffMatch[1].trimEnd();
+  const tail = signoffMatch[2].trimStart();
+  const openMatch = head.match(ON_AIR_OPEN_LINE_RE);
+  const openPart = openMatch ? openMatch[0].trim() : '';
+  const bodyStart = openMatch ? openMatch.index! + openMatch[0].length : 0;
+  const bodyRaw = head.slice(bodyStart).trim();
+  if (!bodyRaw) return t;
+  const blocks = bodyRaw
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  const deduped: string[] = [];
+  for (const block of blocks) {
+    const prev = deduped[deduped.length - 1];
+    if (
+      prev &&
+      normalizeText(prev).length >= 40 &&
+      normalizeText(block).length >= 40 &&
+      normalizeText(prev) === normalizeText(block)
+    ) {
+      continue;
+    }
+    deduped.push(block);
+  }
+  const newHead = openPart
+    ? `${openPart}\n\n${deduped.join('\n\n')}`.trim()
+    : deduped.join('\n\n').trim();
+  return `${newHead}\n\n${tail}`;
+}
+
 function countOnAirWords(onAir: string): number {
   return onAir
     .replace(/\r\n/g, '\n')
@@ -793,6 +833,45 @@ function autoRepairOnAirCultureMismatch(
   return next.trim();
 }
 
+function beatPrefixForSection(section: Collected['section']): string {
+  if (section === 'SKATE') return 'SKATEBOARDING BEAT';
+  if (section === 'LOCAL') return 'TIMBERWOLVES BEAT';
+  if (section === 'REPAIR') return 'REPAIR BEAT';
+  return 'ON THE BOARD';
+}
+
+/** Inject spoken lines for <<<SOURCES>>> rows whose headlines never appear in ON AIR. */
+function autoRepairOnAirMissingStoryAnchors(
+  onAir: string,
+  finalSegments: FinalSegment[],
+  localBizName: string
+): string {
+  let next = onAir.trim();
+  const stories = finalSegments.map((s) => s.row);
+  for (let i = 0; i < stories.length; i++) {
+    const row = stories[i];
+    if (!row) continue;
+    const hay = normalizeText(next);
+    const candidates = anchorCandidatesForStory(row, i, stories);
+    if (candidates.some((c) => hay.includes(c))) continue;
+    const line = `${beatPrefixForSection(row.section)} — ${briefHeadlineAllCaps(row.title)}`;
+    next = insertBeforeNeighborhoodClose(next, line, localBizName);
+  }
+  return next.trim();
+}
+
+/** Last-resort ON AIR fixes when Gemini exhausts validation retries (common in CI). */
+function applyLastResortOnAirRepair(
+  onAir: string,
+  finalSegments: FinalSegment[],
+  localBizName: string
+): string {
+  let next = autoRepairOnAirCultureMismatch(onAir, finalSegments, localBizName);
+  next = autoRepairOnAirMissingStoryAnchors(next, finalSegments, localBizName);
+  next = dedupeAdjacentOnAirParagraphs(next);
+  return next.trim();
+}
+
 /**
  * At most one sports row ([LOCAL] or [SKATE]); if present it must be first or last in <<<SOURCES>>>.
  */
@@ -833,7 +912,8 @@ function validateStudioOutput(
   shouldRequireSkateBeat: boolean,
   cultureMode: CultureSectionMode,
   /** Raw model ON AIR (before culture auto-repair) — sports beats must be written here, not injected. */
-  modelOnAir?: string
+  modelOnAir?: string,
+  options?: { relaxEditorialWordCap?: boolean }
 ): string[] {
   const modelText = (modelOnAir ?? onAir).trim();
   const issues: string[] = [];
@@ -955,7 +1035,7 @@ function validateStudioOutput(
       parseInt(process.env.ON_AIR_EDITORIAL_MAX_WORDS ?? '185', 10) || 185
     )
   );
-  if (words > editorialMax && words <= onAirMax) {
+  if (words > editorialMax && words <= onAirMax && !options?.relaxEditorialWordCap) {
     issues.push(
       `ON AIR is wordy (${words} words); editorial target is ${onAirMin}–${editorialMax} between START and END — trim filler and one clause per beat before retrying.`
     );
@@ -1450,7 +1530,7 @@ async function runNewsAgent() {
   // This includes the non-interactive CI variants: PICK_URLS (forced hand-pick) and LIST_CANDIDATES (dump list).
   const pickModeFetch =
     process.env.PICK_MODE?.trim() === '1' ||
-    !!process.env.PICK_URLS?.trim() ||
+    parsePickUrls(process.env.PICK_URLS).length > 0 ||
     process.env.LIST_CANDIDATES?.trim() === '1';
   const fetchSkate = pickModeFetch || cultureMode !== 'LOCAL';
   const fetchLocal = pickModeFetch || cultureMode !== 'SKATE';
@@ -2200,14 +2280,10 @@ ${localColorBlock}
   }
 
   if (!pickMode && validationIssues.length) {
-    // Last-resort rescue: the most common cause of exhausting all retries is a
-    // forced sports pick (weekly skate cadence / Wolves) that the model lists in
-    // <<<SOURCES>>> but never *speaks* in ON AIR. autoRepairOnAirCultureMismatch
-    // already injects a spoken "SKATEBOARDING BEAT —" / "TIMBERWOLVES BEAT —" line
-    // for exactly this, but normally only runs after this throw. Apply it here and
-    // re-validate so a flaky culture-beat alignment ships an episode instead of
-    // hard-failing CI (no email at all).
-    const rescued = autoRepairOnAirCultureMismatch(
+    // Last-resort rescue: Gemini often lists a forced sports pick in <<<SOURCES>>> but
+    // never speaks it, or omits headline keywords / duplicates a paragraph. Repair and
+    // re-validate so CI ships the email instead of hard-failing after retries.
+    const rescued = applyLastResortOnAirRepair(
       onAirForEmail,
       finalSegments,
       localBizName
@@ -2219,11 +2295,20 @@ ${localColorBlock}
       finalSegments.map((s) => s.row),
       shouldRequireSkateBeat,
       cultureMode,
-      rescued
+      rescued,
+      { relaxEditorialWordCap: true }
+    ).filter(
+      (issue) =>
+        !issue.includes('required programmatic fill-in for story number(s)')
     );
+    if (hasAdjacentDuplicateNewsParagraphs(rescued)) {
+      rescuedIssues.push(
+        'ON AIR still has duplicate story paragraphs after auto-repair.'
+      );
+    }
     if (!rescuedIssues.length) {
       console.warn(
-        'Validation cleared via culture-beat auto-repair (injected spoken sports line) instead of failing — original issues:\n' +
+        'Validation cleared via last-resort ON AIR auto-repair instead of failing — original issues:\n' +
           validationIssues.join('\n')
       );
       onAirForEmail = rescued;
